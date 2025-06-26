@@ -37,6 +37,7 @@ struct CameraView: View {
     @State private var whiteMergeThreshold: Double = 20
     
     @State private var ballCounts = ZoneCounts()
+    @State private var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)? = nil
     
     private var magnificationGesture: some Gesture {
         MagnificationGesture()
@@ -158,173 +159,24 @@ struct CameraView: View {
                                 .frame(height: 20)
                             
                             // Original cropped image
-                            VStack(alignment: .leading) {
-                                Text("Original Image")
-                                    .font(.headline)
-                                    .padding(.horizontal)
-                                Image(uiImage: croppedImage)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color.black)
-                            }
+                            OriginalImageSection(croppedImage: croppedImage)
                             
-                            // Quantized image
-                            VStack(alignment: .leading, spacing: 15) {
-                                Text("Quantized Image")
-                                    .font(.headline)
-                                    .padding(.horizontal)
-                                
-                                if let quantizedImage = ColorQuantizer.quantize(
-                                    image: croppedImage,
-                                    redThreshold: redThreshold,
-                                    blueThreshold: blueThreshold,
-                                    whiteThreshold: whiteThreshold
-                                ) {
-                                    Image(uiImage: quantizedImage)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(maxWidth: .infinity)
-                                        .background(Color.black)
-                                        .onChange(of: quantizedImage) { _ in
-                                            // Update ball counts whenever the quantized image changes
-                                            ballCounts = BallCounter.countBalls(in: quantizedImage, sensitivity: Double(regionSensitivity))
-                                        }
-                                    
-                                    // Threshold controls
-                                    VStack(spacing: 10) {
-                                        Toggle("Show Threshold Controls", isOn: $showThresholdControls)
-                                            .padding(.horizontal)
-                                        
-                                        if showThresholdControls {
-                                            VStack(spacing: 15) {
-                                                ThresholdSlider(value: $redThreshold, color: ThemeColors.red, label: "Red Threshold", range: 0.1...1.0)
-                                                ThresholdSlider(value: $blueThreshold, color: ThemeColors.blue, label: "Blue Threshold", range: 0.1...1.0)
-                                                ThresholdSlider(value: $whiteThreshold, color: Color.white, label: "White Threshold", range: 0.1...1.0)
-                                                ThresholdSlider(value: $regionSensitivity, color: .white, label: "Region Sensitivity", range: 0.1...5.0)
-                                                    .opacity(0.8)
-                                                
-                                                Button(action: {
-                                                    UIImageWriteToSavedPhotosAlbum(quantizedImage, nil, nil, nil)
-                                                }) {
-                                                    Label("Save to Camera Roll", systemImage: "square.and.arrow.down")
-                                                        .foregroundColor(.white)
-                                                        .padding()
-                                                        .background(Color.blue)
-                                                        .cornerRadius(10)
-                                                }
-                                            }
-                                            .padding(.horizontal)
-                                        }
-                                    }
-                                    
-                                    // Detection Overlay
-                                    let detector = BallCounter(parameters: .init(
-                                        minClusterSize: Int(50.0 * regionSensitivity),
-                                        ballRadiusRatio: CGFloat(ballRadiusRatio),
-                                        exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
-                                        whiteMergeThreshold: Int(20.0 * regionSensitivity)
-                                    ))
-                                    let result = detector.detectBalls(in: quantizedImage)
-                                    
-                                    VStack(alignment: .leading, spacing: 15) {
-                                        Text("Detection Overlay")
-                                            .font(.headline)
-                                            .padding(.horizontal)
-                                        
-                                        if let annotatedImage = result.annotatedImage {
-                                            Image(uiImage: annotatedImage)
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(maxWidth: .infinity)
-                                                .background(Color.black)
-                                            
-                                            // Detection Parameter Controls
-                                            VStack(spacing: 10) {
-                                                Toggle("Show Detection Controls", isOn: $showDetectionControls)
-                                                    .padding(.horizontal)
-                                                
-                                                if showDetectionControls {
-                                                    VStack(spacing: 10) {
-                                                        ParameterSlider(value: $minClusterSize,
-                                                                      range: 10...200,
-                                                                      label: "Min Cluster Size")
-                                                        
-                                                        ParameterSlider(value: $ballRadiusRatio,
-                                                                      range: 0.02...0.1,
-                                                                      label: "Ball Radius Ratio")
-                                                        
-                                                        ParameterSlider(value: $exclusionRadiusMultiplier,
-                                                                      range: 1.0...2.0,
-                                                                      label: "Exclusion Radius")
-                                                        
-                                                        ParameterSlider(value: $whiteMergeThreshold,
-                                                                      range: 5...50,
-                                                                      label: "White Merge Threshold")
-                                                        
-                                                        Button(action: {
-                                                            let newResult = detector.detectBalls(in: quantizedImage)
-                                                            ballCounts = newResult.zoneCounts
-                                                        }) {
-                                                            Label("Update Display", systemImage: "arrow.clockwise")
-                                                                .foregroundColor(.white)
-                                                                .padding()
-                                                                .background(Color.green)
-                                                                .cornerRadius(10)
-                                                        }
-                                                    }
-                                                    .padding()
-                                                    .background(Color.black.opacity(0.5))
-                                                    .cornerRadius(10)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Ball counts display
-                                    VStack(spacing: 10) {
-                                        Text("Ball Counts")
-                                            .font(.headline)
-                                            .foregroundColor(.white)
-                                        
-                                        HStack(spacing: 20) {
-                                            // Middle zone counts
-                                            VStack(alignment: .leading) {
-                                                Text("Middle Zone")
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.gray)
-                                                BallCountRow(count: ballCounts.middle)
-                                            }
-                                            
-                                            Divider()
-                                                .background(Color.gray)
-                                            
-                                            // Outside zone counts
-                                            VStack(alignment: .leading) {
-                                                Text("Outside Zone")
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.gray)
-                                                BallCountRow(count: ballCounts.outside)
-                                            }
-                                            
-                                            Divider()
-                                                .background(Color.gray)
-                                            
-                                            // Total counts
-                                            VStack(alignment: .leading) {
-                                                Text("Total")
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.gray)
-                                                BallCountRow(count: ballCounts.total)
-                                            }
-                                        }
-                                        .padding()
-                                        .background(Color.black.opacity(0.5))
-                                        .cornerRadius(10)
-                                    }
-                                    .padding(.horizontal)
-                                }
-                            }
+                            // Quantized and Detection sections
+                            QuantizedImageSection(
+                                croppedImage: croppedImage,
+                                redThreshold: $redThreshold,
+                                blueThreshold: $blueThreshold,
+                                whiteThreshold: $whiteThreshold,
+                                showThresholdControls: $showThresholdControls,
+                                regionSensitivity: $regionSensitivity,
+                                showDetectionControls: $showDetectionControls,
+                                minClusterSize: $minClusterSize,
+                                ballRadiusRatio: $ballRadiusRatio,
+                                exclusionRadiusMultiplier: $exclusionRadiusMultiplier,
+                                whiteMergeThreshold: $whiteMergeThreshold,
+                                ballCounts: $ballCounts,
+                                currentDetectionResult: $currentDetectionResult
+                            )
                         }
                     }
                     
@@ -942,6 +794,304 @@ struct BallCountRow: View {
                     .foregroundColor(.white)
             }
         }
+    }
+}
+
+// MARK: - Original Image Section
+struct OriginalImageSection: View {
+    let croppedImage: UIImage
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text("Original Image")
+                .font(.headline)
+                .padding(.horizontal)
+            Image(uiImage: croppedImage)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity)
+                .background(Color.black)
+        }
+    }
+}
+
+// MARK: - Quantized Image Section
+struct QuantizedImageSection: View {
+    let croppedImage: UIImage
+    @Binding var redThreshold: CGFloat
+    @Binding var blueThreshold: CGFloat
+    @Binding var whiteThreshold: CGFloat
+    @Binding var showThresholdControls: Bool
+    @Binding var regionSensitivity: CGFloat
+    @Binding var showDetectionControls: Bool
+    @Binding var minClusterSize: Double
+    @Binding var ballRadiusRatio: Double
+    @Binding var exclusionRadiusMultiplier: Double
+    @Binding var whiteMergeThreshold: Double
+    @Binding var ballCounts: ZoneCounts
+    @Binding var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)?
+    @StateObject private var appSettings = AppSettingsManager.shared
+    @State private var lastQuantizedHash: Int = 0
+    @State private var isProcessing: Bool = false
+    
+    private func runDetection(on image: UIImage, isManualUpdate: Bool = false) {
+        guard !isProcessing else { return }
+        isProcessing = true
+        
+        if appSettings.debugMode {
+            print("DEBUG: \(isManualUpdate ? "Manual" : "Auto") detection requested")
+        }
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let detector = BallCounter(parameters: .init(
+                minClusterSize: Int(isManualUpdate ? minClusterSize : 50.0 * regionSensitivity),
+                ballRadiusRatio: CGFloat(ballRadiusRatio),
+                exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
+                whiteMergeThreshold: Int(isManualUpdate ? whiteMergeThreshold : 20.0 * regionSensitivity)
+            ))
+            let result = detector.detectBalls(in: image)
+            
+            DispatchQueue.main.async {
+                withAnimation {
+                    currentDetectionResult = result
+                    ballCounts = result.zoneCounts
+                    
+                    if appSettings.debugMode {
+                        print("DEBUG: Ball counts updated - Middle: Red=\(ballCounts.middle.red), Blue=\(ballCounts.middle.blue)")
+                        print("DEBUG: Ball counts updated - Outside: Red=\(ballCounts.outside.red), Blue=\(ballCounts.outside.blue)")
+                    }
+                }
+                isProcessing = false
+            }
+        }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Text("Quantized Image")
+                .font(.headline)
+                .padding(.horizontal)
+            
+            if let quantizedImage = ColorQuantizer.quantize(
+                image: croppedImage,
+                redThreshold: redThreshold,
+                blueThreshold: blueThreshold,
+                whiteThreshold: whiteThreshold
+            ) {
+                let newHash = quantizedImage.hashValue
+                
+                Image(uiImage: quantizedImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.black)
+                    .onChange(of: newHash) { _ in
+                        if newHash != lastQuantizedHash {
+                            lastQuantizedHash = newHash
+                            runDetection(on: quantizedImage)
+                        }
+                    }
+                    .onAppear {
+                        if currentDetectionResult == nil {
+                            runDetection(on: quantizedImage)
+                        }
+                    }
+                    .overlay(
+                        Group {
+                            if isProcessing {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(1.5)
+                            }
+                        }
+                    )
+                
+                // Threshold controls
+                ThresholdControlsSection(
+                    showThresholdControls: $showThresholdControls,
+                    redThreshold: $redThreshold,
+                    blueThreshold: $blueThreshold,
+                    whiteThreshold: $whiteThreshold,
+                    regionSensitivity: $regionSensitivity,
+                    quantizedImage: quantizedImage
+                )
+                
+                // Detection Overlay
+                if let result = currentDetectionResult,
+                   let annotatedImage = result.annotatedImage {
+                    DetectionOverlaySection(
+                        annotatedImage: annotatedImage,
+                        showDetectionControls: $showDetectionControls,
+                        minClusterSize: $minClusterSize,
+                        ballRadiusRatio: $ballRadiusRatio,
+                        exclusionRadiusMultiplier: $exclusionRadiusMultiplier,
+                        whiteMergeThreshold: $whiteMergeThreshold,
+                        quantizedImage: quantizedImage,
+                        ballCounts: $ballCounts,
+                        currentDetectionResult: $currentDetectionResult,
+                        onManualUpdate: {
+                            runDetection(on: quantizedImage, isManualUpdate: true)
+                        }
+                    )
+                }
+                
+                // Ball counts display
+                BallCountsDisplaySection(ballCounts: ballCounts)
+            }
+        }
+    }
+}
+
+// MARK: - Threshold Controls Section
+struct ThresholdControlsSection: View {
+    @Binding var showThresholdControls: Bool
+    @Binding var redThreshold: CGFloat
+    @Binding var blueThreshold: CGFloat
+    @Binding var whiteThreshold: CGFloat
+    @Binding var regionSensitivity: CGFloat
+    let quantizedImage: UIImage
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            Toggle("Show Threshold Controls", isOn: $showThresholdControls)
+                .padding(.horizontal)
+            
+            if showThresholdControls {
+                VStack(spacing: 15) {
+                    ThresholdSlider(value: $redThreshold, color: ThemeColors.red, label: "Red Threshold", range: 0.1...1.0)
+                    ThresholdSlider(value: $blueThreshold, color: ThemeColors.blue, label: "Blue Threshold", range: 0.1...1.0)
+                    ThresholdSlider(value: $whiteThreshold, color: Color.white, label: "White Threshold", range: 0.1...1.0)
+                    ThresholdSlider(value: $regionSensitivity, color: .white, label: "Region Sensitivity", range: 0.1...5.0)
+                        .opacity(0.8)
+                    
+                    Button(action: {
+                        UIImageWriteToSavedPhotosAlbum(quantizedImage, nil, nil, nil)
+                    }) {
+                        Label("Save to Camera Roll", systemImage: "square.and.arrow.down")
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(10)
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+    }
+}
+
+// MARK: - Detection Overlay Section
+struct DetectionOverlaySection: View {
+    let annotatedImage: UIImage
+    @Binding var showDetectionControls: Bool
+    @Binding var minClusterSize: Double
+    @Binding var ballRadiusRatio: Double
+    @Binding var exclusionRadiusMultiplier: Double
+    @Binding var whiteMergeThreshold: Double
+    let quantizedImage: UIImage
+    @Binding var ballCounts: ZoneCounts
+    @Binding var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)?
+    let onManualUpdate: () -> Void
+    @StateObject private var appSettings = AppSettingsManager.shared
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Text("Detection Overlay")
+                .font(.headline)
+                .padding(.horizontal)
+            
+            Image(uiImage: annotatedImage)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity)
+                .background(Color.black)
+            
+            // Detection Parameter Controls
+            VStack(spacing: 10) {
+                Toggle("Show Detection Controls", isOn: $showDetectionControls)
+                    .padding(.horizontal)
+                
+                if showDetectionControls {
+                    VStack(spacing: 10) {
+                        ParameterSlider(value: $minClusterSize,
+                                      range: 10...200,
+                                      label: "Min Cluster Size")
+                        
+                        ParameterSlider(value: $ballRadiusRatio,
+                                      range: 0.02...0.1,
+                                      label: "Ball Radius Ratio")
+                        
+                        ParameterSlider(value: $exclusionRadiusMultiplier,
+                                      range: 1.0...2.0,
+                                      label: "Exclusion Radius")
+                        
+                        ParameterSlider(value: $whiteMergeThreshold,
+                                      range: 5...50,
+                                      label: "White Merge Threshold")
+                        
+                        Button(action: onManualUpdate) {
+                            Label("Update Display", systemImage: "arrow.clockwise")
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(Color.green)
+                                .cornerRadius(10)
+                        }
+                    }
+                    .padding()
+                    .background(Color.black.opacity(0.5))
+                    .cornerRadius(10)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Ball Counts Display Section
+struct BallCountsDisplaySection: View {
+    let ballCounts: ZoneCounts
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("Ball Counts")
+                .font(.headline)
+                .foregroundColor(.white)
+            
+            HStack(spacing: 20) {
+                // Middle zone counts
+                VStack(alignment: .leading) {
+                    Text("Middle Zone")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                    BallCountRow(count: ballCounts.middle)
+                }
+                
+                Divider()
+                    .background(Color.gray)
+                
+                // Outside zone counts
+                VStack(alignment: .leading) {
+                    Text("Outside Zone")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                    BallCountRow(count: ballCounts.outside)
+                }
+                
+                Divider()
+                    .background(Color.gray)
+                
+                // Total counts
+                VStack(alignment: .leading) {
+                    Text("Total")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                    BallCountRow(count: ballCounts.total)
+                }
+            }
+            .padding()
+            .background(Color.black.opacity(0.5))
+            .cornerRadius(10)
+        }
+        .padding(.horizontal)
     }
 }
 

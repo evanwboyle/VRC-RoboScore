@@ -490,6 +490,140 @@ class BallCounter {
         
         return UIGraphicsGetImageFromCurrentImageContext()
     }
+    
+    // MARK: - Inspection Methods
+    fileprivate struct InspectionResult {
+        var clusterSize: Int
+        var color: BallColor?
+        var isExcluded: Bool
+        var nearestBallDistance: CGFloat?
+        var isInMiddleZone: Bool
+        var reason: String
+        var inspectedPoint: CGPoint?
+    }
+    
+    fileprivate func inspectPoint(_ point: CGPoint, in image: UIImage) -> InspectionResult {
+        guard let cgImage = image.cgImage else {
+            return InspectionResult(
+                clusterSize: 0,
+                color: nil,
+                isExcluded: false,
+                nearestBallDistance: nil,
+                isInMiddleZone: false,
+                reason: "Failed to get image data",
+                inspectedPoint: nil
+            )
+        }
+        
+        // Scale point to match working image coordinates
+        let scaledPoint = CGPoint(
+            x: min(max(0, point.x * params.imageScale), CGFloat(cgImage.width - 1)),
+            y: min(max(0, point.y * params.imageScale), CGFloat(cgImage.height - 1))
+        )
+        
+        // Check if point is excluded
+        if isExcluded(scaledPoint) {
+            return InspectionResult(
+                clusterSize: 0,
+                color: nil,
+                isExcluded: true,
+                nearestBallDistance: nil,
+                isInMiddleZone: false,
+                reason: "Point is in exclusion zone of another detected ball",
+                inspectedPoint: point
+            )
+        }
+        
+        let bytesPerPixel = 4
+        let bytesPerRow = cgImage.width * bytesPerPixel
+        var pixelData = [UInt8](repeating: 0, count: cgImage.width * cgImage.height * bytesPerPixel)
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(data: &pixelData,
+                                    width: cgImage.width,
+                                    height: cgImage.height,
+                                    bitsPerComponent: 8,
+                                    bytesPerRow: bytesPerRow,
+                                    space: colorSpace,
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return InspectionResult(
+                clusterSize: 0,
+                color: nil,
+                isExcluded: false,
+                nearestBallDistance: nil,
+                isInMiddleZone: false,
+                reason: "Failed to create graphics context",
+                inspectedPoint: point
+            )
+        }
+        
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+        
+        // Get color at point
+        let x = Int(scaledPoint.x)
+        let y = Int(scaledPoint.y)
+        let pixelIndex = (y * cgImage.width + x) * bytesPerPixel
+        let color = getPixelColor(data: pixelData, index: pixelIndex)
+        
+        if color == nil {
+            return InspectionResult(
+                clusterSize: 0,
+                color: nil,
+                isExcluded: false,
+                nearestBallDistance: nil,
+                isInMiddleZone: false,
+                reason: "Point is not a recognized color (red or blue)",
+                inspectedPoint: point
+            )
+        }
+        
+        // Find cluster
+        imageWidth = cgImage.width
+        imageHeight = cgImage.height
+        visited = Array(repeating: false, count: imageWidth * imageHeight)
+        let cluster = findCluster(at: scaledPoint, color: color!, in: pixelData)
+        let clusterSize = cluster.pixels.count
+        
+        // Calculate minimum required cluster size based on current parameters
+        let minPixelsForBall = Int(params.minClusterSize)
+        
+        // Calculate ball radius for distance checks
+        let ballRadius = CGFloat(cgImage.width) * params.ballRadiusRatio
+        
+        // Find nearest detected ball
+        var nearestDistance: CGFloat?
+        if !detectedBalls.isEmpty {
+            let clusterCenter = calculateClusterCenter(cluster.pixels)
+            nearestDistance = detectedBalls.map { ball in
+                let dx = ball.center.x - clusterCenter.x / params.imageScale
+                let dy = ball.center.y - clusterCenter.y / params.imageScale
+                return sqrt(dx * dx + dy * dy)
+            }.min()
+        }
+        
+        // Check if point would be in middle zone
+        let isInMiddle = detectedBalls.first?.isInMiddleZone ?? false
+        
+        // Determine reason for detection/non-detection
+        var reason: String
+        if clusterSize < minPixelsForBall {
+            reason = "Cluster size (\(clusterSize)) is smaller than minimum required size (\(minPixelsForBall))"
+        } else if let distance = nearestDistance, distance < ballRadius * params.exclusionRadiusMultiplier {
+            reason = "Too close to another detected ball (distance: \(Int(distance))px, minimum required: \(Int(ballRadius * params.exclusionRadiusMultiplier))px)"
+        } else {
+            reason = "Cluster meets detection criteria (size: \(clusterSize)px, minimum: \(minPixelsForBall)px)"
+        }
+        
+        return InspectionResult(
+            clusterSize: clusterSize,
+            color: color,
+            isExcluded: false,
+            nearestBallDistance: nearestDistance,
+            isInMiddleZone: isInMiddle,
+            reason: reason,
+            inspectedPoint: point
+        )
+    }
 }
 
 // MARK: - Preview
@@ -516,6 +650,13 @@ struct BallCounterPreview: View {
     @State private var exclusionRadiusMultiplier: Double = 1.2
     @State private var whiteMergeThreshold: Double = 20
     
+    // Inspection mode state
+    @State private var isInspectionMode = false
+    @State private var lastInspectionResult: BallCounter.InspectionResult?
+    
+    // Add inspected point visualization
+    @State private var inspectedPoint: CGPoint?
+    
     private var detector: BallCounter {
         BallCounter(parameters: .init(
             minClusterSize: Int(minClusterSize),
@@ -526,109 +667,176 @@ struct BallCounterPreview: View {
     }
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                if let annotatedImage = annotatedImage {
-                    Image(uiImage: annotatedImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
-                } else if let image = image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
-                }
-                
-                Button(action: {
-                    showImagePicker = true
-                }) {
-                    Label("Choose Image", systemImage: "photo.on.rectangle")
-                        .foregroundColor(.white)
-                        .padding()
-                        .background(Color.blue)
-                        .cornerRadius(10)
-                }
-                
-                // Parameter controls
-                VStack(spacing: 10) {
-                    ParameterSlider(value: $minClusterSize,
-                                  range: 10...200,
-                                  label: "Min Cluster Size")
-                    
-                    ParameterSlider(value: $ballRadiusRatio,
-                                  range: 0.02...0.1,
-                                  label: "Ball Radius Ratio")
-                    
-                    ParameterSlider(value: $exclusionRadiusMultiplier,
-                                  range: 1.0...2.0,
-                                  label: "Exclusion Radius")
-                    
-                    ParameterSlider(value: $whiteMergeThreshold,
-                                  range: 5...50,
-                                  label: "White Merge Threshold")
-                }
-                .padding()
-                .background(Color.black.opacity(0.5))
-                .cornerRadius(10)
-                
-                // Ball counts
-                VStack(alignment: .leading) {
-                    Text("Ball Counts:")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                    
-                    Group {
-                        Text("Middle Zone:")
-                            .foregroundColor(.white)
-                        HStack {
-                            Text("Red: \(zoneCounts.middle.red)")
-                                .foregroundColor(.red)
-                            Text("Blue: \(zoneCounts.middle.blue)")
-                                .foregroundColor(.blue)
+        HStack(spacing: 20) {
+            // Image and controls on the left
+            if let annotatedImage = annotatedImage {
+                Image(uiImage: annotatedImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .overlay(
+                        GeometryReader { geometry in
+                            ZStack {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { location in
+                                        if isInspectionMode {
+                                            inspectedPoint = location
+                                            inspectLocation(location, in: geometry)
+                                        }
+                                    }
+                                
+                                // Show inspection point
+                                if isInspectionMode, let point = inspectedPoint {
+                                    Circle()
+                                        .stroke(Color.yellow, lineWidth: 2)
+                                        .frame(width: 20, height: 20)
+                                        .position(point)
+                                }
+                            }
                         }
-                        
-                        Text("Outside Zone:")
-                            .foregroundColor(.white)
-                        HStack {
-                            Text("Red: \(zoneCounts.outside.red)")
-                                .foregroundColor(.red)
-                            Text("Blue: \(zoneCounts.outside.blue)")
-                                .foregroundColor(.blue)
-                        }
-                        
-                        Text("Total:")
-                            .foregroundColor(.white)
-                        HStack {
-                            Text("Red: \(zoneCounts.total.red)")
-                                .foregroundColor(.red)
-                            Text("Blue: \(zoneCounts.total.blue)")
-                                .foregroundColor(.blue)
-                        }
-                    }
-                    .padding(.leading)
-                }
-                .padding()
-                .background(Color.black.opacity(0.5))
-                .cornerRadius(10)
-                
-                // Detect button
-                Button(action: detectBalls) {
-                    Label("Detect Balls", systemImage: "wand.and.stars")
-                        .foregroundColor(.white)
-                        .padding()
-                        .background(Color.green)
-                        .cornerRadius(10)
-                }
-                .disabled(image == nil)
+                    )
+            } else if let image = image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
             }
-            .padding()
+            
+            // Controls and results on the right
+            ScrollView {
+                VStack(spacing: 20) {
+                    Button(action: {
+                        showImagePicker = true
+                    }) {
+                        Label("Choose Image", systemImage: "photo.on.rectangle")
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(10)
+                    }
+                    
+                    // Inspection Results
+                    if isInspectionMode, let result = lastInspectionResult {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Inspection Results")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            Group {
+                                if let color = result.color {
+                                    Text("Color: \(color == .red ? "Red" : "Blue")")
+                                } else {
+                                    Text("Color: None detected")
+                                }
+                                
+                                Text("Cluster Size: \(result.clusterSize) pixels")
+                                
+                                if let distance = result.nearestBallDistance {
+                                    Text("Distance to nearest ball: \(Int(distance))px")
+                                }
+                                
+                                Text("In Middle Zone: \(result.isInMiddleZone ? "Yes" : "No")")
+                                Text("Is Excluded: \(result.isExcluded ? "Yes" : "No")")
+                                Text("Analysis: \(result.reason)")
+                            }
+                            .foregroundColor(.white)
+                        }
+                        .padding()
+                        .background(Color.black.opacity(0.5))
+                        .cornerRadius(10)
+                    }
+                    
+                    // Parameter controls
+                    VStack(spacing: 10) {
+                        Toggle("Inspection Mode", isOn: $isInspectionMode)
+                            .onChange(of: isInspectionMode) { _, newValue in
+                                if !newValue {
+                                    lastInspectionResult = nil
+                                    inspectedPoint = nil
+                                }
+                            }
+                            .padding(.horizontal)
+                        
+                        ParameterSlider(value: $minClusterSize,
+                                      range: 10...200,
+                                      label: "Min Cluster Size")
+                        
+                        ParameterSlider(value: $ballRadiusRatio,
+                                      range: 0.02...0.1,
+                                      label: "Ball Radius Ratio")
+                        
+                        ParameterSlider(value: $exclusionRadiusMultiplier,
+                                      range: 1.0...2.0,
+                                      label: "Exclusion Radius")
+                        
+                        ParameterSlider(value: $whiteMergeThreshold,
+                                      range: 5...50,
+                                      label: "White Merge Threshold")
+                    }
+                    .padding()
+                    .background(Color.black.opacity(0.5))
+                    .cornerRadius(10)
+                    
+                    // Ball counts
+                    VStack(alignment: .leading) {
+                        Text("Ball Counts:")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        
+                        Group {
+                            Text("Middle Zone:")
+                                .foregroundColor(.white)
+                            HStack {
+                                Text("Red: \(zoneCounts.middle.red)")
+                                    .foregroundColor(.red)
+                                Text("Blue: \(zoneCounts.middle.blue)")
+                                    .foregroundColor(.blue)
+                            }
+                            
+                            Text("Outside Zone:")
+                                .foregroundColor(.white)
+                            HStack {
+                                Text("Red: \(zoneCounts.outside.red)")
+                                    .foregroundColor(.red)
+                                Text("Blue: \(zoneCounts.outside.blue)")
+                                    .foregroundColor(.blue)
+                            }
+                            
+                            Text("Total:")
+                                .foregroundColor(.white)
+                            HStack {
+                                Text("Red: \(zoneCounts.total.red)")
+                                    .foregroundColor(.red)
+                                Text("Blue: \(zoneCounts.total.blue)")
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .padding(.leading)
+                    }
+                    .padding()
+                    .background(Color.black.opacity(0.5))
+                    .cornerRadius(10)
+                    
+                    // Detect button
+                    Button(action: detectBalls) {
+                        Label("Detect Balls", systemImage: "wand.and.stars")
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.green)
+                            .cornerRadius(10)
+                    }
+                    .disabled(image == nil)
+                }
+                .padding()
+            }
+            .frame(width: 300)  // Fixed width for controls
         }
         .background(Color.black)
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $image)
         }
-        .onChange(of: image) { _ in
+        .onChange(of: image) { _, _ in
             detectBalls()
         }
     }
@@ -638,6 +846,30 @@ struct BallCounterPreview: View {
         let result = detector.detectBalls(in: image)
         zoneCounts = result.zoneCounts
         annotatedImage = result.annotatedImage
+    }
+    
+    private func inspectLocation(_ location: CGPoint, in geometry: GeometryProxy) {
+        guard let image = image else { return }
+        
+        // Convert tap location to image coordinates
+        let imageSize = image.size
+        let viewSize = geometry.size
+        
+        // Calculate scaling factors
+        let scaleX = imageSize.width / viewSize.width
+        let scaleY = imageSize.height / viewSize.height
+        
+        // Convert tap location to image coordinates
+        let imageX = location.x * scaleX
+        let imageY = location.y * scaleY
+        
+        // Inspect the point
+        lastInspectionResult = detector.inspectPoint(CGPoint(x: imageX, y: imageY), in: image)
+        
+        if AppSettingsManager.shared.debugMode {
+            print("DEBUG: Inspection at (\(Int(imageX)), \(Int(imageY)))")
+            print("DEBUG: \(lastInspectionResult?.reason ?? "No result")")
+        }
     }
 }
 

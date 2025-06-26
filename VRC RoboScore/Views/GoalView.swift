@@ -11,6 +11,8 @@ struct GoalView: View {
         return total >= 15
     }
     
+    private let vexOrange = Color(red: 0xE0/255.0, green: 0x84/255.0, blue: 0x2C/255.0)
+    
     var body: some View {
         HStack(spacing: 4) {
             if alliance == .red {
@@ -49,12 +51,12 @@ struct GoalView: View {
                 ZStack {
                     HStack(spacing: 0) {
                         Rectangle()
-                            .fill(Color.yellow)
+                            .fill(vexOrange)
                             .frame(width: 4)
                         Rectangle()
                             .fill(Color.gray.opacity(0.2))
                         Rectangle()
-                            .fill(Color.yellow)
+                            .fill(vexOrange)
                             .frame(width: 4)
                     }
                     .frame(height: 40)
@@ -68,12 +70,12 @@ struct GoalView: View {
                             }
                     } else {
                         Rectangle()
-                            .fill(Color.yellow)
+                            .fill(vexOrange)
                             .frame(width: 4)
                         Rectangle()
                             .fill(goal.type == .middleGoal ? (goal.controlPoint.controlledBy?.color ?? Color.gray.opacity(0.2)) : Color.gray.opacity(0.2))
                         Rectangle()
-                            .fill(Color.yellow)
+                            .fill(vexOrange)
                             .frame(width: 4)
                     }
                 }
@@ -343,6 +345,8 @@ struct ParkZoneView: View {
 struct CombinedGoalPipeView: View {
     @ObservedObject var redGoal: Goal
     @ObservedObject var blueGoal: Goal
+    private let vexOrange = Color(red: 0xE0/255.0, green: 0x84/255.0, blue: 0x2C/255.0)
+    
     var body: some View {
         let isLong = redGoal.type == .longGoal
         HStack(alignment: .center, spacing: 0) {
@@ -352,7 +356,7 @@ struct CombinedGoalPipeView: View {
             ZStack {
                 HStack(spacing: 0) {
                     Rectangle()
-                        .fill(Color.yellow)
+                        .fill(vexOrange)
                         .frame(width: 8)
                     if isLong {
                         Button(action: {
@@ -385,7 +389,7 @@ struct CombinedGoalPipeView: View {
                             .frame(width: 124, height: 40)
                     }
                     Rectangle()
-                        .fill(Color.yellow)
+                        .fill(vexOrange)
                         .frame(width: 8)
                 }
                 .frame(width: isLong ? 200 : 140, height: 40)

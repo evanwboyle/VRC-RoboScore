@@ -1,0 +1,37 @@
+{
+  "configurations" : [
+    {
+      "id" : "0AD3B36C-0A68-4BB0-BBE2-73BC2B46136B",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:VRC RoboScore.xcodeproj",
+      "identifier" : "762277992DD630260039E6C3",
+      "name" : "VRC RoboScore"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:VRC RoboScore.xcodeproj",
+        "identifier" : "762277A62DD6302A0039E6C3",
+        "name" : "VRC RoboScoreTests"
+      }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:VRC RoboScore.xcodeproj",
+        "identifier" : "762277B02DD6302A0039E6C3",
+        "name" : "VRC RoboScoreUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

@@ -52,9 +52,27 @@ struct ContentView: View {
 struct CalculatorView: View {
     @ObservedObject var gameState: GameState
     @StateObject private var appSettings = AppSettingsManager.shared
-    @State private var showingResetConfirmation = false
     @State private var showingCamera = false
+    @State private var showingShareSheet = false
+    @State private var scoreToShare = ""
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
+    @State private var importSuccessful = false
+    
+    // Alert state management
+    enum AlertType: Identifiable {
+        case resetConfirmation
+        case importError(String)
+        
+        var id: Int {
+            switch self {
+            case .resetConfirmation:
+                return 0
+            case .importError:
+                return 1
+            }
+        }
+    }
+    @State private var activeAlert: AlertType?
     
     var body: some View {
         NavigationView {
@@ -65,141 +83,49 @@ struct CalculatorView: View {
                 GeometryReader { geometry in
                     ScrollView {
                         VStack(spacing: 24) {
-                            // Score Header
-                            HStack(spacing: 40) {
-                                Text("\(calculateScore(for: .red))")
-                                    .font(.system(size: 64, weight: .bold))
-                                    .foregroundColor(ThemeColors.red)
-                                    .frame(width: 120, alignment: .trailing)
-                                
-                                AutonButton(gameState: gameState)
-                                
-                                Text("\(calculateScore(for: .blue))")
-                                    .font(.system(size: 64, weight: .bold))
-                                    .foregroundColor(ThemeColors.blue)
-                                    .frame(width: 120, alignment: .leading)
-                            }
-                            .padding(.top)
-                            
-                            // Debug information (only shown when debug mode is enabled)
-                            if appSettings.debugMode {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("DEBUG MODE")
-                                        .font(.headline)
-                                        .foregroundColor(.orange)
-                                    
-                                    Text("Red Score Breakdown:")
-                                        .font(.subheadline)
-                                        .foregroundColor(.red)
-                                    Text("  Top Goals: \(calculateTopGoalScore(for: .red))")
-                                    Text("  Bottom Goals: \(calculateBottomGoalScore(for: .red))")
-                                    let redParkedCount = gameState.parkedRobots[.red] ?? 0
-                                    let redParkedScore = redParkedCount == 1 ? 8 : (redParkedCount == 2 ? 30 : 0)
-                                    Text("  Parked Robots: \(redParkedScore)")
-                                    let redAutoScore = gameState.autoWinner == .red ? 10 : (gameState.autoWinner == .tie ? 5 : 0)
-                                    Text("  Auto Winner: \(redAutoScore)")
-                                    
-                                    Text("Blue Score Breakdown:")
-                                        .font(.subheadline)
-                                        .foregroundColor(.blue)
-                                    Text("  Top Goals: \(calculateTopGoalScore(for: .blue))")
-                                    Text("  Bottom Goals: \(calculateBottomGoalScore(for: .blue))")
-                                    let blueParkedCount = gameState.parkedRobots[.blue] ?? 0
-                                    let blueParkedScore = blueParkedCount == 1 ? 8 : (blueParkedCount == 2 ? 30 : 0)
-                                    Text("  Parked Robots: \(blueParkedScore)")
-                                    let blueAutoScore = gameState.autoWinner == .blue ? 10 : (gameState.autoWinner == .tie ? 5 : 0)
-                                    Text("  Auto Winner: \(blueAutoScore)")
-                                }
-                                .padding()
-                                .background(Color.gray.opacity(0.1))
-                                .cornerRadius(8)
-                                .padding(.horizontal)
-                            }
-                            
                             if geometry.size.width > geometry.size.height {
-                                // Landscape layout
-                                HStack(alignment: .top, spacing: 20) {
-                                    // Left column - Long goals
-                                    VStack(spacing: 16) {
-                                        ForEach(0..<2) { index in
-                                            CombinedGoalPipeView(redGoal: gameState.topGoals[index].redGoal, blueGoal: gameState.topGoals[index].blueGoal)
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    
-                                    // Right column - Middle goals and park zones
-                                    VStack(spacing: 16) {
-                                        ForEach(0..<2) { index in
-                                            CombinedGoalPipeView(redGoal: gameState.bottomGoals[index].redGoal, blueGoal: gameState.bottomGoals[index].blueGoal)
-                                        }
-                                        
-                                        HStack(spacing: 20) {
-                                            VStack {
-                                                ParkZoneView(alliance: .red, count: Binding(
-                                                    get: { gameState.parkedRobots[.red] ?? 0 },
-                                                    set: { gameState.parkedRobots[.red] = $0 }
-                                                ))
-                                            }
-                                            VStack {
-                                                ParkZoneView(alliance: .blue, count: Binding(
-                                                    get: { gameState.parkedRobots[.blue] ?? 0 },
-                                                    set: { gameState.parkedRobots[.blue] = $0 }
-                                                ))
-                                            }
-                                        }
-                                        .padding(.horizontal, 20)
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                }
-                                .padding(.horizontal)
+                                LandscapeCalculatorContent(gameState: gameState)
                             } else {
-                                // Portrait layout
-                                VStack(spacing: 12) {
-                                    // Top Goals
-                                    VStack(spacing: 8) {
-                                        ForEach(0..<2) { index in
-                                            CombinedGoalPipeView(redGoal: gameState.topGoals[index].redGoal, blueGoal: gameState.topGoals[index].blueGoal)
-                                        }
-                                    }
-                                    .padding(.horizontal)
-                                    
-                                    // Bottom Goals
-                                    VStack(spacing: 8) {
-                                        ForEach(0..<2) { index in
-                                            CombinedGoalPipeView(redGoal: gameState.bottomGoals[index].redGoal, blueGoal: gameState.bottomGoals[index].blueGoal)
-                                        }
-                                    }
-                                    .padding(.horizontal)
-                                    
-                                    // Park Zones
-                                    HStack(spacing: 20) {
-                                        VStack {
-                                            ParkZoneView(alliance: .red, count: Binding(
-                                                get: { gameState.parkedRobots[.red] ?? 0 },
-                                                set: { gameState.parkedRobots[.red] = $0 }
-                                            ))
-                                        }
-                                        VStack {
-                                            ParkZoneView(alliance: .blue, count: Binding(
-                                                get: { gameState.parkedRobots[.blue] ?? 0 },
-                                                set: { gameState.parkedRobots[.blue] = $0 }
-                                            ))
-                                        }
-                                    }
-                                    .padding(.horizontal, 20)
-                                }
+                                PortraitCalculatorContent(gameState: gameState)
+                            }
+                            
+                            // Debug information
+                            if appSettings.debugMode {
+                                DebugView(gameState: gameState)
                             }
                         }
                         .padding(.vertical)
+                        .frame(maxWidth: .infinity)
                     }
                 }
             }
             .navigationTitle("VRC RoboScore")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationBarItems(
-                leading: Button(action: {
-                    showingResetConfirmation = true
-                }) {
-                    Image(systemName: "arrow.counterclockwise")
+                leading: HStack {
+                    Button(action: {
+                        activeAlert = .resetConfirmation
+                    }) {
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                    Button(action: {
+                        handleImport()
+                    }) {
+                        if importSuccessful {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        } else {
+                            Image(systemName: "square.and.arrow.down")
+                        }
+                    }
+                    Button(action: {
+                        let generatedScore = ScoreSharer.generateScoreText(gameState: gameState)
+                        Logger.debug("Generated score text: \(generatedScore)")
+                        scoreToShare = generatedScore
+                        showingShareSheet = true
+                    }) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
                 },
                 trailing: HStack {
                     Button(action: {
@@ -209,92 +135,289 @@ struct CalculatorView: View {
                     }
                 }
             )
-            .alert(isPresented: $showingResetConfirmation) {
-                Alert(
-                    title: Text("Reset Score?"),
-                    message: Text("This will reset all scores to 0. This cannot be undone."),
-                    primaryButton: .destructive(Text("Reset")) {
-                        gameState.reset()
-                    },
-                    secondaryButton: .cancel()
-                )
+            .alert(item: $activeAlert) { alertType in
+                switch alertType {
+                case .resetConfirmation:
+                    return Alert(
+                        title: Text("Reset Score?"),
+                        message: Text("This will reset all scores to 0. This cannot be undone."),
+                        primaryButton: .destructive(Text("Reset")) {
+                            gameState.reset()
+                        },
+                        secondaryButton: .cancel()
+                    )
+                case .importError(let message):
+                    return Alert(
+                        title: Text("Import Failed"),
+                        message: Text(message),
+                        dismissButton: .default(Text("OK"))
+                    )
+                }
             }
             .fullScreenCover(isPresented: $showingCamera) {
                 CameraView()
             }
+            .sheet(isPresented: $showingShareSheet, onDismiss: {
+                Logger.debug("Share sheet dismissed")
+                scoreToShare = ""
+            }) {
+                ShareSheet(shareText: $scoreToShare)
+            }
         }
     }
     
-    private func calculateScore(for alliance: Alliance) -> Int {
-        var score = 0
-        
-        // Add scores from top goals
-        for pair in gameState.topGoals {
-            let goal = (alliance == .red) ? pair.redGoal : pair.blueGoal
-            score += (goal.blocks[alliance] ?? 0) * 3
-            // Check both goals' center control for this alliance
-            if pair.redGoal.centerControl == alliance || pair.blueGoal.centerControl == alliance {
-                score += 10
+    private func handleImport() {
+        let result = ScoreImporter.importFromClipboard(into: gameState)
+        switch result {
+        case .success:
+            Logger.debug("Import succeeded")
+            importSuccessful = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                importSuccessful = false
             }
+        case .failure(let error):
+            Logger.error("Import failed: \(error.localizedDescription)")
+            activeAlert = .importError(error.localizedDescription)
         }
-        
-        // Add scores from bottom goals
-        for pair in gameState.bottomGoals {
-            let goal = (alliance == .red) ? pair.redGoal : pair.blueGoal
-            score += (goal.blocks[alliance] ?? 0) * 3
-            if goal.controlPoint.controlledBy == alliance {
-                score += 8
+    }
+}
+
+// MARK: - Landscape Calculator Content
+struct LandscapeCalculatorContent: View {
+    @ObservedObject var gameState: GameState
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top row with scores and park zones
+            HStack(alignment: .top, spacing: 20) {
+                // Scores on the left
+                HStack(spacing: 30) {
+                    Text("\(calculateScore(for: .red, gameState: gameState))")
+                        .font(.system(size: 64, weight: .bold))
+                        .foregroundColor(ThemeColors.red)
+                        .frame(minWidth: 120, alignment: .trailing)
+                    
+                    AutonButton(gameState: gameState)
+                    
+                    Text("\(calculateScore(for: .blue, gameState: gameState))")
+                        .font(.system(size: 64, weight: .bold))
+                        .foregroundColor(ThemeColors.blue)
+                        .frame(minWidth: 120, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading)
+                
+                // Park zones on the right
+                HStack(spacing: 20) {
+                    VStack {
+                        ParkZoneView(alliance: .red, count: Binding(
+                            get: { gameState.parkedRobots[.red] ?? 0 },
+                            set: { gameState.parkedRobots[.red] = $0 }
+                        ))
+                    }
+                    VStack {
+                        ParkZoneView(alliance: .blue, count: Binding(
+                            get: { gameState.parkedRobots[.blue] ?? 0 },
+                            set: { gameState.parkedRobots[.blue] = $0 }
+                        ))
+                    }
+                }
+                .padding(.trailing)
+                .padding(.bottom, 10)
+                .padding(.trailing, 45)
             }
+            
+            // Goals layout
+            HStack(alignment: .top, spacing: 20) {
+                // Left column - Long goals
+                VStack(spacing: 8) {
+                    ForEach(0..<2) { index in
+                        CombinedGoalPipeView(redGoal: gameState.topGoals[index].redGoal, blueGoal: gameState.topGoals[index].blueGoal)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                
+                // Right column - Middle goals
+                VStack(spacing: 8) {
+                    ForEach(0..<2) { index in
+                        CombinedGoalPipeView(redGoal: gameState.bottomGoals[index].redGoal, blueGoal: gameState.bottomGoals[index].blueGoal)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding(.horizontal)
         }
-        
-        // Add parked robot scores
-        let parkedCount = gameState.parkedRobots[alliance] ?? 0
-        if parkedCount == 1 {
-            score += 8
-        } else if parkedCount == 2 {
-            score += 30
+    }
+}
+
+// MARK: - Portrait Calculator Content
+struct PortraitCalculatorContent: View {
+    @ObservedObject var gameState: GameState
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Score Header
+            HStack(spacing: 30) {
+                Text("\(calculateScore(for: .red, gameState: gameState))")
+                    .font(.system(size: 64, weight: .bold))
+                    .foregroundColor(ThemeColors.red)
+                    .frame(minWidth: 120, alignment: .trailing)
+                
+                AutonButton(gameState: gameState)
+                
+                Text("\(calculateScore(for: .blue, gameState: gameState))")
+                    .font(.system(size: 64, weight: .bold))
+                    .foregroundColor(ThemeColors.blue)
+                    .frame(minWidth: 120, alignment: .leading)
+            }
+            .padding(.top)
+            .frame(maxWidth: .infinity, alignment: .center)
+            
+            // Top Goals
+            VStack(spacing: 8) {
+                ForEach(0..<2) { index in
+                    CombinedGoalPipeView(redGoal: gameState.topGoals[index].redGoal, blueGoal: gameState.topGoals[index].blueGoal)
+                }
+            }
+            .padding(.horizontal)
+            
+            // Bottom Goals
+            VStack(spacing: 8) {
+                ForEach(0..<2) { index in
+                    CombinedGoalPipeView(redGoal: gameState.bottomGoals[index].redGoal, blueGoal: gameState.bottomGoals[index].blueGoal)
+                }
+            }
+            .padding(.horizontal)
+            
+            // Park Zones
+            HStack(spacing: 20) {
+                VStack {
+                    ParkZoneView(alliance: .red, count: Binding(
+                        get: { gameState.parkedRobots[.red] ?? 0 },
+                        set: { gameState.parkedRobots[.red] = $0 }
+                    ))
+                }
+                VStack {
+                    ParkZoneView(alliance: .blue, count: Binding(
+                        get: { gameState.parkedRobots[.blue] ?? 0 },
+                        set: { gameState.parkedRobots[.blue] = $0 }
+                    ))
+                }
+            }
+            .padding(.horizontal, 20)
         }
-        
-        // Add autonomous winner bonus
-        if gameState.autoWinner == alliance {
+    }
+}
+
+// MARK: - Debug View
+struct DebugView: View {
+    @ObservedObject var gameState: GameState
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("DEBUG MODE")
+                .font(.headline)
+                .foregroundColor(.orange)
+            
+            Text("Red Score Breakdown:")
+                .font(.subheadline)
+                .foregroundColor(.red)
+            Text("  Top Goals: \(calculateTopGoalScore(for: .red, gameState: gameState))")
+            Text("  Bottom Goals: \(calculateBottomGoalScore(for: .red, gameState: gameState))")
+            let redParkedCount = gameState.parkedRobots[.red] ?? 0
+            let redParkedScore = redParkedCount == 1 ? 8 : (redParkedCount == 2 ? 30 : 0)
+            Text("  Parked Robots: \(redParkedScore)")
+            let redAutoScore = gameState.autoWinner == .red ? 10 : (gameState.autoWinner == .tie ? 5 : 0)
+            Text("  Auto Winner: \(redAutoScore)")
+            
+            Text("Blue Score Breakdown:")
+                .font(.subheadline)
+                .foregroundColor(.blue)
+            Text("  Top Goals: \(calculateTopGoalScore(for: .blue, gameState: gameState))")
+            Text("  Bottom Goals: \(calculateBottomGoalScore(for: .blue, gameState: gameState))")
+            let blueParkedCount = gameState.parkedRobots[.blue] ?? 0
+            let blueParkedScore = blueParkedCount == 1 ? 8 : (blueParkedCount == 2 ? 30 : 0)
+            Text("  Parked Robots: \(blueParkedScore)")
+            let blueAutoScore = gameState.autoWinner == .blue ? 10 : (gameState.autoWinner == .tie ? 5 : 0)
+            Text("  Auto Winner: \(blueAutoScore)")
+        }
+        .padding()
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(8)
+        .padding(.horizontal)
+    }
+}
+
+// MARK: - Score Calculation Functions
+func calculateScore(for alliance: Alliance, gameState: GameState) -> Int {
+    var score = 0
+    
+    // Add scores from top goals
+    for pair in gameState.topGoals {
+        let goal = (alliance == .red) ? pair.redGoal : pair.blueGoal
+        score += (goal.blocks[alliance] ?? 0) * 3
+        // Check both goals' center control for this alliance
+        if pair.redGoal.centerControl == alliance || pair.blueGoal.centerControl == alliance {
             score += 10
-        } else if gameState.autoWinner == .tie {
-            score += 5
         }
-        
-        return score
     }
     
-    private func calculateTopGoalScore(for alliance: Alliance) -> Int {
-        var score = 0
-        
-        // Add scores from top goals
-        for pair in gameState.topGoals {
-            let goal = (alliance == .red) ? pair.redGoal : pair.blueGoal
-            score += (goal.blocks[alliance] ?? 0) * 3
-            // Check both goals' center control for this alliance
-            if pair.redGoal.centerControl == alliance || pair.blueGoal.centerControl == alliance {
-                score += 10
-            }
+    // Add scores from bottom goals
+    for pair in gameState.bottomGoals {
+        let goal = (alliance == .red) ? pair.redGoal : pair.blueGoal
+        score += (goal.blocks[alliance] ?? 0) * 3
+        if goal.controlPoint.controlledBy == alliance {
+            score += 8
         }
-        
-        return score
     }
     
-    private func calculateBottomGoalScore(for alliance: Alliance) -> Int {
-        var score = 0
-        
-        // Add scores from bottom goals
-        for pair in gameState.bottomGoals {
-            let goal = (alliance == .red) ? pair.redGoal : pair.blueGoal
-            score += (goal.blocks[alliance] ?? 0) * 3
-            if goal.controlPoint.controlledBy == alliance {
-                score += 8
-            }
-        }
-        
-        return score
+    // Add parked robot scores
+    let parkedCount = gameState.parkedRobots[alliance] ?? 0
+    if parkedCount == 1 {
+        score += 8
+    } else if parkedCount == 2 {
+        score += 30
     }
+    
+    // Add autonomous winner bonus
+    if gameState.autoWinner == alliance {
+        score += 10
+    } else if gameState.autoWinner == .tie {
+        score += 5
+    }
+    
+    return score
+}
+
+func calculateTopGoalScore(for alliance: Alliance, gameState: GameState) -> Int {
+    var score = 0
+    
+    // Add scores from top goals
+    for pair in gameState.topGoals {
+        let goal = (alliance == .red) ? pair.redGoal : pair.blueGoal
+        score += (goal.blocks[alliance] ?? 0) * 3
+        // Check both goals' center control for this alliance
+        if pair.redGoal.centerControl == alliance || pair.blueGoal.centerControl == alliance {
+            score += 10
+        }
+    }
+    
+    return score
+}
+
+func calculateBottomGoalScore(for alliance: Alliance, gameState: GameState) -> Int {
+    var score = 0
+    
+    // Add scores from bottom goals
+    for pair in gameState.bottomGoals {
+        let goal = (alliance == .red) ? pair.redGoal : pair.blueGoal
+        score += (goal.blocks[alliance] ?? 0) * 3
+        if goal.controlPoint.controlledBy == alliance {
+            score += 8
+        }
+    }
+    
+    return score
 }
 
 // MARK: - Auton Button
@@ -309,6 +432,8 @@ struct AutonButton: View {
     // For haptic feedback
     let impactGenerator = UIImpactFeedbackGenerator(style: .medium)
     let selectionGenerator = UISelectionFeedbackGenerator()
+    
+    private let vexOrange = Color(red: 0xE0/255.0, green: 0x84/255.0, blue: 0x2C/255.0)
     
     private func calculateAngle(from offset: CGSize) -> Double {
         let angle = atan2(offset.height, offset.width) * (180 / .pi)
@@ -383,10 +508,10 @@ struct AutonButton: View {
                     VStack(spacing: 4) {
                         Text("TIE")
                             .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(Color.yellow.opacity(0.8))
+                            .foregroundColor(vexOrange.opacity(0.8))
                         Rectangle()
                             .fill(LinearGradient(
-                                gradient: Gradient(colors: [.clear, Color.yellow.opacity(0.7)]),
+                                gradient: Gradient(colors: [.clear, vexOrange.opacity(0.7)]),
                                 startPoint: .bottom,
                                 endPoint: .top
                             ))
