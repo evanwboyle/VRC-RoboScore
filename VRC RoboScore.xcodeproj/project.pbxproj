@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		7657F31A2E0E065E00AFD00F /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = 7657F3182E0E065900AFD00F /* .gitignore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		762277A82DD6302A0039E6C3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,6 +31,7 @@
 		7622779A2DD630260039E6C3 /* VRC RoboScore.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "VRC RoboScore.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		762277A72DD6302A0039E6C3 /* VRC RoboScoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "VRC RoboScoreTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		762277B12DD6302A0039E6C3 /* VRC RoboScoreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "VRC RoboScoreUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7657F3182E0E065900AFD00F /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -79,6 +84,7 @@
 				762277AA2DD6302A0039E6C3 /* VRC RoboScoreTests */,
 				762277B42DD6302A0039E6C3 /* VRC RoboScoreUITests */,
 				7622779B2DD630260039E6C3 /* Products */,
+				7657F3182E0E065900AFD00F /* .gitignore */,
 			);
 			sourceTree = "<group>";
 		};
@@ -212,6 +218,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7657F31A2E0E065E00AFD00F /* .gitignore in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
