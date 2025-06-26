@@ -158,9 +158,12 @@ Dependencies/
 *.xcodeproj/*
 !*.xcodeproj/project.pbxproj
 !*.xcodeproj/xcshareddata/
-!*.xcodeproj/project.xcworkspace/
 !*.xcworkspace/contents.xcworkspacedata
-/*.gcno
 **/xcshareddata/WorkspaceSettings.xcsettings
+
+# Xcode user-specific files
+*.xcuserstate
+xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
 
 # End of https://www.toptal.com/developers/gitignore/api/swift,xcode,objective-c,osx
