@@ -19,6 +19,24 @@ class AppSettingsManager: ObservableObject {
     @AppStorage("visualModeRaw") private var visualModeRaw: String = VisualMode.auto.rawValue
     @AppStorage("customBackgroundColorHex") private var customBackgroundColorHex: String = "#FFFFFF"
     
+    @Published var ballRadiusRatio: Double = 0.024 {
+        didSet {
+            UserDefaults.standard.set(ballRadiusRatio, forKey: "ballRadiusRatio")
+        }
+    }
+    
+    @Published var exclusionRadiusMultiplier: Double = 1.2 {
+        didSet {
+            UserDefaults.standard.set(exclusionRadiusMultiplier, forKey: "exclusionRadiusMultiplier")
+        }
+    }
+    
+    @Published var ballAreaPercentage: Double = 30.0 {
+        didSet {
+            UserDefaults.standard.set(ballAreaPercentage, forKey: "ballAreaPercentage")
+        }
+    }
+    
     var visualMode: VisualMode {
         get {
             return VisualMode(rawValue: visualModeRaw) ?? .auto
@@ -39,7 +57,17 @@ class AppSettingsManager: ObservableObject {
     
     static let shared = AppSettingsManager()
     
-    private init() {}
+    private init() {
+        debugMode = UserDefaults.standard.bool(forKey: "debugMode")
+        ballRadiusRatio = UserDefaults.standard.double(forKey: "ballRadiusRatio")
+        exclusionRadiusMultiplier = UserDefaults.standard.double(forKey: "exclusionRadiusMultiplier")
+        ballAreaPercentage = UserDefaults.standard.double(forKey: "ballAreaPercentage")
+        
+        // Set default values if not already set
+        if ballRadiusRatio == 0 { ballRadiusRatio = 0.024 }
+        if exclusionRadiusMultiplier == 0 { exclusionRadiusMultiplier = 1.2 }
+        if ballAreaPercentage == 0 { ballAreaPercentage = 30.0 }
+    }
     
     func getCurrentBackgroundColor() -> Color {
         switch visualMode {

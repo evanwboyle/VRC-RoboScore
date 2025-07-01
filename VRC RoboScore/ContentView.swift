@@ -53,6 +53,7 @@ struct CalculatorView: View {
     @ObservedObject var gameState: GameState
     @StateObject private var appSettings = AppSettingsManager.shared
     @State private var showingCamera = false
+    @State private var showingMultiGoalCamera = false
     @State private var showingShareSheet = false
     @State private var scoreToShare = ""
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
@@ -129,6 +130,19 @@ struct CalculatorView: View {
                 },
                 trailing: HStack {
                     Button(action: {
+                        showingMultiGoalCamera = true
+                    }) {
+                        ZStack {
+                            Image(systemName: "camera.circle")
+                            Text("4")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                                .offset(x: 10, y: 10)
+                        }
+                        .accessibilityLabel("Multi-Goal Camera")
+                    }
+                    Button(action: {
                         showingCamera = true
                     }) {
                         Image(systemName: "camera")
@@ -156,6 +170,9 @@ struct CalculatorView: View {
             }
             .fullScreenCover(isPresented: $showingCamera) {
                 CameraView()
+            }
+            .fullScreenCover(isPresented: $showingMultiGoalCamera) {
+                MultiGoalCameraView()
             }
             .sheet(isPresented: $showingShareSheet, onDismiss: {
                 Logger.debug("Share sheet dismissed")

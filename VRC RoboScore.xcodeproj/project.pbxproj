@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		7638A0432E0ED50300AA89C4 /* PythonKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7638A0422E0ED50300AA89C4 /* PythonKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		762277A82DD6302A0039E6C3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7638A0432E0ED50300AA89C4 /* PythonKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = "VRC RoboScore";
 			packageProductDependencies = (
+				7638A0422E0ED50300AA89C4 /* PythonKit */,
 			);
 			productName = "VRC RoboScore";
 			productReference = 7622779A2DD630260039E6C3 /* VRC RoboScore.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = 762277912DD630260039E6C3;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				7638A0412E0ED50300AA89C4 /* XCRemoteSwiftPackageReference "PythonKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7622779B2DD630260039E6C3 /* Products */;
 			projectDirPath = "";
@@ -566,6 +575,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		7638A0412E0ED50300AA89C4 /* XCRemoteSwiftPackageReference "PythonKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pvieito/PythonKit.git";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7638A0422E0ED50300AA89C4 /* PythonKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7638A0412E0ED50300AA89C4 /* XCRemoteSwiftPackageReference "PythonKit" */;
+			productName = PythonKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 762277922DD630260039E6C3 /* Project object */;
 }

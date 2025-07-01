@@ -31,10 +31,9 @@ struct CameraView: View {
     
     // Detection parameter states
     @State private var showDetectionControls: Bool = false
-    @State private var minClusterSize: Double = 50
-    @State private var ballRadiusRatio: Double = 0.024
-    @State private var exclusionRadiusMultiplier: Double = 1.2
-    @State private var whiteMergeThreshold: Double = 20
+    @State private var ballRadiusRatio: Double = AppSettingsManager.shared.ballRadiusRatio
+    @State private var exclusionRadiusMultiplier: Double = AppSettingsManager.shared.exclusionRadiusMultiplier
+    @State private var ballAreaPercentage: Double = AppSettingsManager.shared.ballAreaPercentage
     
     @State private var ballCounts = ZoneCounts()
     @State private var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)? = nil
@@ -170,10 +169,9 @@ struct CameraView: View {
                                 showThresholdControls: $showThresholdControls,
                                 regionSensitivity: $regionSensitivity,
                                 showDetectionControls: $showDetectionControls,
-                                minClusterSize: $minClusterSize,
                                 ballRadiusRatio: $ballRadiusRatio,
                                 exclusionRadiusMultiplier: $exclusionRadiusMultiplier,
-                                whiteMergeThreshold: $whiteMergeThreshold,
+                                ballAreaPercentage: $ballAreaPercentage,
                                 ballCounts: $ballCounts,
                                 currentDetectionResult: $currentDetectionResult
                             )
@@ -183,6 +181,15 @@ struct CameraView: View {
                     HStack(spacing: 20) {
                         Button("Back") {
                             self.croppedImage = nil
+                            self.currentDetectionResult = nil
+                            self.ballCounts = ZoneCounts()
+                            self.scale = 1.0
+                            self.offset = .zero
+                            self.lastOffset = .zero
+                            self.rotation = .zero
+                            self.lastRotation = .zero
+                            self.isDragging = false
+                            self.isRotating = false
                         }
                         .buttonStyle(AppleButtonStyle(color: .blue))
                         
@@ -327,8 +334,13 @@ struct CameraView: View {
         let scaledOffsetX = offset.width / scale
         let scaledOffsetY = offset.height / scale
         
-        let cropX = screenCenterX - (neonLineWidth / 2) + scaledOffsetX
-        let cropY = screenCenterY - (neonLineHeight / 2) + scaledOffsetY
+        // Determine if we need to invert offsets based on rotation
+        let normalizedRotation = (rotation.degrees.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        let shouldInvertX = normalizedRotation > 90 && normalizedRotation < 270
+        let shouldInvertY = shouldInvertX
+        
+        let cropX = screenCenterX - (neonLineWidth / 2) + (shouldInvertX ? scaledOffsetX : -scaledOffsetX)
+        let cropY = screenCenterY - (neonLineHeight / 2) + (shouldInvertY ? scaledOffsetY : -scaledOffsetY)
         
         // Create crop rect in screen coordinates
         let cropRect = CGRect(
@@ -465,10 +477,18 @@ struct NeonGreenLineOverlay: View {
 // MARK: - Custom Camera View using AVFoundation
 struct CustomCameraView: UIViewControllerRepresentable {
     @Binding var capturedImage: UIImage?
+    var useWideCamera: Bool = false
+    var rotateCapturedImage90Degrees: Bool = false
+    var hideNeonLine: Bool = false
+    var shutterVerticalFraction: CGFloat = 1.0
     
     func makeUIViewController(context: Context) -> CustomCameraViewController {
         let controller = CustomCameraViewController()
         controller.delegate = context.coordinator
+        controller.useWideCamera = useWideCamera
+        controller.rotateCapturedImage90Degrees = rotateCapturedImage90Degrees
+        controller.hideNeonLine = hideNeonLine
+        controller.shutterVerticalFraction = shutterVerticalFraction
         return controller
     }
     
@@ -511,6 +531,10 @@ class CustomCameraViewController: UIViewController {
     private let neonLineView = NeonHorizontalLineView()
     
     private var flashMode: AVCaptureDevice.FlashMode = .off
+    var useWideCamera: Bool = false
+    var rotateCapturedImage90Degrees: Bool = false
+    var hideNeonLine: Bool = false
+    var shutterVerticalFraction: CGFloat = 1.0
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -536,10 +560,29 @@ class CustomCameraViewController: UIViewController {
         }
     }
     
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        videoPreviewLayer.frame = view.bounds
+        if rotateCapturedImage90Degrees {
+            videoPreviewLayer.connection?.videoOrientation = .landscapeRight
+        } else {
+            videoPreviewLayer.connection?.videoOrientation = .portrait
+        }
+    }
+    
     private func setupCamera() {
         captureSession = AVCaptureSession()
         captureSession.sessionPreset = .photo
         
+        if useWideCamera {
+            // Always use 1x wide camera
+            guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraPosition) else {
+                print("Failed to get wide camera device")
+                return
+            }
+            setupCameraInput(camera)
+            return
+        }
         // Try to get the ultra-wide camera (0.5x) first
         guard let camera = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: cameraPosition) else {
             // Fall back to wide camera if ultra-wide not available
@@ -550,7 +593,6 @@ class CustomCameraViewController: UIViewController {
             setupCameraInput(fallbackCamera)
             return
         }
-        
         setupCameraInput(camera)
     }
     
@@ -575,10 +617,12 @@ class CustomCameraViewController: UIViewController {
         videoPreviewLayer.frame = view.bounds
         view.layer.addSublayer(videoPreviewLayer)
         
-        // Add neon line overlay
-        neonLineView.frame = view.bounds
-        neonLineView.backgroundColor = .clear
-        view.addSubview(neonLineView)
+        // Add neon line overlay unless hidden
+        if !hideNeonLine {
+            neonLineView.frame = view.bounds
+            neonLineView.backgroundColor = .clear
+            view.addSubview(neonLineView)
+        }
     }
     
     private func setupUI() {
@@ -619,36 +663,66 @@ class CustomCameraViewController: UIViewController {
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         flashButton.translatesAutoresizingMaskIntoConstraints = false
         neonLineView.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            // Capture button
-            captureButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            captureButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
-            captureButton.widthAnchor.constraint(equalToConstant: 70),
-            captureButton.heightAnchor.constraint(equalToConstant: 70),
-            
-            // Photo library button
-            photoLibraryButton.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
-            photoLibraryButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 30),
-            photoLibraryButton.widthAnchor.constraint(equalToConstant: 44),
-            photoLibraryButton.heightAnchor.constraint(equalToConstant: 44),
-            
-            // Cancel button
-            cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            
-            // Flash button
-            flashButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            flashButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            flashButton.widthAnchor.constraint(equalToConstant: 44),
-            flashButton.heightAnchor.constraint(equalToConstant: 44),
-            
-            // Neon line view
-            neonLineView.topAnchor.constraint(equalTo: view.topAnchor),
-            neonLineView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            neonLineView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            neonLineView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+
+        if useWideCamera && rotateCapturedImage90Degrees {
+            // Landscape: capture button right, at shutterVerticalFraction height
+            NSLayoutConstraint.activate([
+                captureButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -30),
+                captureButton.centerYAnchor.constraint(equalTo: view.topAnchor, constant: view.bounds.height * shutterVerticalFraction),
+                captureButton.widthAnchor.constraint(equalToConstant: 70),
+                captureButton.heightAnchor.constraint(equalToConstant: 70),
+
+                photoLibraryButton.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
+                photoLibraryButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 30),
+                photoLibraryButton.widthAnchor.constraint(equalToConstant: 44),
+                photoLibraryButton.heightAnchor.constraint(equalToConstant: 44),
+
+                cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+                cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+
+                flashButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+                flashButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+                flashButton.widthAnchor.constraint(equalToConstant: 44),
+                flashButton.heightAnchor.constraint(equalToConstant: 44)
+            ])
+            if !hideNeonLine {
+                NSLayoutConstraint.activate([
+                    neonLineView.topAnchor.constraint(equalTo: view.topAnchor),
+                    neonLineView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                    neonLineView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                    neonLineView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+                ])
+            }
+        } else {
+            NSLayoutConstraint.activate([
+                // Capture button
+                captureButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                captureButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+                captureButton.widthAnchor.constraint(equalToConstant: 70),
+                captureButton.heightAnchor.constraint(equalToConstant: 70),
+                // Photo library button
+                photoLibraryButton.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
+                photoLibraryButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 30),
+                photoLibraryButton.widthAnchor.constraint(equalToConstant: 44),
+                photoLibraryButton.heightAnchor.constraint(equalToConstant: 44),
+                // Cancel button
+                cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+                cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+                // Flash button
+                flashButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+                flashButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+                flashButton.widthAnchor.constraint(equalToConstant: 44),
+                flashButton.heightAnchor.constraint(equalToConstant: 44)
+            ])
+            if !hideNeonLine {
+                NSLayoutConstraint.activate([
+                    neonLineView.topAnchor.constraint(equalTo: view.topAnchor),
+                    neonLineView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                    neonLineView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                    neonLineView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+                ])
+            }
+        }
     }
     
     @objc private func toggleFlash() {
@@ -694,7 +768,10 @@ class CustomCameraViewController: UIViewController {
 extension CustomCameraViewController: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let imageData = photo.fileDataRepresentation(),
-           let image = UIImage(data: imageData) {
+           var image = UIImage(data: imageData) {
+            if rotateCapturedImage90Degrees {
+                image = image.rotated(by: -90) ?? image
+            }
             delegate?.didCaptureImage(image)
         }
     }
@@ -824,15 +901,18 @@ struct QuantizedImageSection: View {
     @Binding var showThresholdControls: Bool
     @Binding var regionSensitivity: CGFloat
     @Binding var showDetectionControls: Bool
-    @Binding var minClusterSize: Double
     @Binding var ballRadiusRatio: Double
     @Binding var exclusionRadiusMultiplier: Double
-    @Binding var whiteMergeThreshold: Double
+    @Binding var ballAreaPercentage: Double
     @Binding var ballCounts: ZoneCounts
     @Binding var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)?
     @StateObject private var appSettings = AppSettingsManager.shared
-    @State private var lastQuantizedHash: Int = 0
     @State private var isProcessing: Bool = false
+    
+    private func updateDetection(_ quantizedImage: UIImage) {
+        currentDetectionResult = nil
+        runDetection(on: quantizedImage)
+    }
     
     private func runDetection(on image: UIImage, isManualUpdate: Bool = false) {
         guard !isProcessing else { return }
@@ -844,10 +924,12 @@ struct QuantizedImageSection: View {
         
         DispatchQueue.global(qos: .userInitiated).async {
             let detector = BallCounter(parameters: .init(
-                minClusterSize: Int(isManualUpdate ? minClusterSize : 50.0 * regionSensitivity),
+                minWhiteLineSize: Int(50.0 * regionSensitivity),
                 ballRadiusRatio: CGFloat(ballRadiusRatio),
                 exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
-                whiteMergeThreshold: Int(isManualUpdate ? whiteMergeThreshold : 20.0 * regionSensitivity)
+                whiteMergeThreshold: 20,
+                imageScale: 1.0,
+                ballAreaPercentage: ballAreaPercentage
             ))
             let result = detector.detectBalls(in: image)
             
@@ -878,24 +960,20 @@ struct QuantizedImageSection: View {
                 blueThreshold: blueThreshold,
                 whiteThreshold: whiteThreshold
             ) {
-                let newHash = quantizedImage.hashValue
-                
                 Image(uiImage: quantizedImage)
                     .resizable()
                     .scaledToFit()
                     .frame(maxWidth: .infinity)
                     .background(Color.black)
-                    .onChange(of: newHash) { _ in
-                        if newHash != lastQuantizedHash {
-                            lastQuantizedHash = newHash
-                            runDetection(on: quantizedImage)
-                        }
-                    }
                     .onAppear {
+                        // Only run detection if we don't have a result yet
                         if currentDetectionResult == nil {
                             runDetection(on: quantizedImage)
                         }
                     }
+                    .onChange(of: redThreshold) { _ in updateDetection(quantizedImage) }
+                    .onChange(of: blueThreshold) { _ in updateDetection(quantizedImage) }
+                    .onChange(of: whiteThreshold) { _ in updateDetection(quantizedImage) }
                     .overlay(
                         Group {
                             if isProcessing {
@@ -922,10 +1000,9 @@ struct QuantizedImageSection: View {
                     DetectionOverlaySection(
                         annotatedImage: annotatedImage,
                         showDetectionControls: $showDetectionControls,
-                        minClusterSize: $minClusterSize,
                         ballRadiusRatio: $ballRadiusRatio,
                         exclusionRadiusMultiplier: $exclusionRadiusMultiplier,
-                        whiteMergeThreshold: $whiteMergeThreshold,
+                        ballAreaPercentage: $ballAreaPercentage,
                         quantizedImage: quantizedImage,
                         ballCounts: $ballCounts,
                         currentDetectionResult: $currentDetectionResult,
@@ -984,10 +1061,9 @@ struct ThresholdControlsSection: View {
 struct DetectionOverlaySection: View {
     let annotatedImage: UIImage
     @Binding var showDetectionControls: Bool
-    @Binding var minClusterSize: Double
     @Binding var ballRadiusRatio: Double
     @Binding var exclusionRadiusMultiplier: Double
-    @Binding var whiteMergeThreshold: Double
+    @Binding var ballAreaPercentage: Double
     let quantizedImage: UIImage
     @Binding var ballCounts: ZoneCounts
     @Binding var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)?
@@ -1013,21 +1089,29 @@ struct DetectionOverlaySection: View {
                 
                 if showDetectionControls {
                     VStack(spacing: 10) {
-                        ParameterSlider(value: $minClusterSize,
-                                      range: 10...200,
-                                      label: "Min Cluster Size")
-                        
                         ParameterSlider(value: $ballRadiusRatio,
                                       range: 0.02...0.1,
                                       label: "Ball Radius Ratio")
+                            .onChange(of: ballRadiusRatio) { _, newValue in
+                                appSettings.ballRadiusRatio = newValue
+                                onManualUpdate()
+                            }
                         
                         ParameterSlider(value: $exclusionRadiusMultiplier,
                                       range: 1.0...2.0,
                                       label: "Exclusion Radius")
+                            .onChange(of: exclusionRadiusMultiplier) { _, newValue in
+                                appSettings.exclusionRadiusMultiplier = newValue
+                                onManualUpdate()
+                            }
                         
-                        ParameterSlider(value: $whiteMergeThreshold,
-                                      range: 5...50,
-                                      label: "White Merge Threshold")
+                        ParameterSlider(value: $ballAreaPercentage,
+                                      range: 10...90,
+                                      label: "Ball Area Percentage")
+                            .onChange(of: ballAreaPercentage) { _, newValue in
+                                appSettings.ballAreaPercentage = newValue
+                                onManualUpdate()
+                            }
                         
                         Button(action: onManualUpdate) {
                             Label("Update Display", systemImage: "arrow.clockwise")
@@ -1092,6 +1176,23 @@ struct BallCountsDisplaySection: View {
             .cornerRadius(10)
         }
         .padding(.horizontal)
+    }
+}
+
+extension UIImage {
+    func rotated(by degrees: CGFloat) -> UIImage? {
+        let radians = degrees * .pi / 180
+        var newSize = CGRect(origin: .zero, size: self.size).applying(CGAffineTransform(rotationAngle: radians)).size
+        newSize.width = floor(newSize.width)
+        newSize.height = floor(newSize.height)
+        UIGraphicsBeginImageContextWithOptions(newSize, false, self.scale)
+        guard let context = UIGraphicsGetCurrentContext() else { return nil }
+        context.translateBy(x: newSize.width/2, y: newSize.height/2)
+        context.rotate(by: radians)
+        self.draw(in: CGRect(x: -self.size.width/2, y: -self.size.height/2, width: self.size.width, height: self.size.height))
+        let rotatedImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return rotatedImage
     }
 }
 
