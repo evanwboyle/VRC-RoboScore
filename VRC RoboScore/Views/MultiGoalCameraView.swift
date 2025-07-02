@@ -59,8 +59,14 @@ struct MultiGoalCameraView: View {
                                     if dragState == .start {
                                         // Find closest endpoint to the touch
                                         let touch = value.startLocation
-                                        if let closest = allEndpoints.min(by: { $0.pos.distance(to: touch) < $1.pos.distance(to: touch) }),
-                                           closest.line == i, closest.point == pointIdx {
+                                        // Use a maximum distance threshold for selection
+                                        let maxDistance: CGFloat = 100 // Increased from implicit 75 (half of 150)
+                                        let closestPoint = allEndpoints
+                                            .filter { $0.line == i && $0.point == pointIdx }
+                                            .min(by: { $0.pos.distance(to: touch) < $1.pos.distance(to: touch) })
+                                        
+                                        if let closest = closestPoint,
+                                           closest.pos.distance(to: touch) <= maxDistance {
                                             dragging = (i, pointIdx)
                                             dragStart = value.startLocation
                                             dragStartEndpoint = lineEndpoints[i][pointIdx]
@@ -71,9 +77,11 @@ struct MultiGoalCameraView: View {
                                         let relX = min(max(dragStartEndpoint.x + delta.x / screenGeometry.size.width, 0), 1)
                                         let relY = min(max(dragStartEndpoint.y + delta.y / screenGeometry.size.height, 0), 1)
                                         lineEndpoints[i][pointIdx] = CGPoint(x: relX, y: relY)
-                                    } else if dragState == .end, dragActive, dragging?.line == i, dragging?.point == pointIdx {
-                                        let pt = lineEndpoints[i][pointIdx]
-                                        print("\(lineColorNames[i]) endpoint \(pointIdx) moved to (x=\(String(format: "%.3f", pt.x)), y=\(String(format: "%.3f", pt.y)))")
+                                    } else if dragState == .end {
+                                        if dragActive && dragging?.line == i && dragging?.point == pointIdx {
+                                            let pt = lineEndpoints[i][pointIdx]
+                                            print("\(lineColorNames[i]) endpoint \(pointIdx) moved to (x=\(String(format: "%.3f", pt.x)), y=\(String(format: "%.3f", pt.y)))")
+                                        }
                                         dragStart = nil
                                         dragStartEndpoint = nil
                                         dragging = nil

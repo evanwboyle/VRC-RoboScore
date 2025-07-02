@@ -18,9 +18,11 @@ struct LineCropsView: View {
     @State private var processedCrops: [LineCrop] = []
     @State private var isProcessing: Bool = true
     @State private var showShareSheet: Bool = false
+    @State private var paddingEnabled: Bool = true
 
     // MARK: - Constants
-    private let padding: CGFloat = 50.0
+    private let minPadding: CGFloat = 20.0 // Minimum padding in pixels
+    private let paddingRatio: CGFloat = 0.05 // 5% of line length
     private let colors: [Color] = [.red, .green, .blue, .orange]
     private let labels: [String] = ["Red Line", "Green Line", "Blue Line", "Orange Line"]
 
@@ -61,9 +63,9 @@ struct LineCropsView: View {
                     // Control buttons
                     HStack(spacing: 24) {
                         Button(action: undo) {
-                            Label("Undo", systemImage: "arrow.uturn.backward")
+                            Label("Back", systemImage: "arrow.left")
                         }
-                        .buttonStyle(ControlButtonStyle(color: .orange))
+                        .buttonStyle(ControlButtonStyle(color: .red))
 
                         Button(action: saveAll) {
                             Label("Save", systemImage: "square.and.arrow.down")
@@ -74,6 +76,17 @@ struct LineCropsView: View {
                             Label("Export", systemImage: "square.and.arrow.up")
                         }
                         .buttonStyle(ControlButtonStyle(color: .blue))
+                        
+                        Button(action: {
+                            paddingEnabled.toggle()
+                            Task {
+                                await processImages()
+                            }
+                        }) {
+                            Label(paddingEnabled ? "Disable Padding" : "Enable Padding", 
+                                  systemImage: paddingEnabled ? "square.slash" : "square")
+                        }
+                        .buttonStyle(ControlButtonStyle(color: .orange))
                     }
                     .padding(.bottom, 20)
                 }
@@ -117,33 +130,142 @@ struct LineCropsView: View {
         let imageSize = uiImage.size
         var tempCrops: [LineCrop] = []
 
+        // Calculate scaling factors based on how the image is displayed in MultiGoalCameraView
+        let screenAspect: CGFloat = 2256.0 / 1179.0 // Your screen dimensions
+        let imageAspect = imageSize.width / imageSize.height
+        
+        // Calculate the scaling factors
+        let (scaleX, scaleY): (CGFloat, CGFloat)
+        let (offsetX, offsetY): (CGFloat, CGFloat)
+        
+        if imageAspect > screenAspect {
+            scaleY = imageSize.height
+            scaleX = scaleY * screenAspect
+            offsetX = (imageSize.width - scaleX) / 2
+            offsetY = 0
+        } else {
+            scaleX = imageSize.width
+            scaleY = scaleX / screenAspect
+            offsetX = 0
+            offsetY = (imageSize.height - scaleY) / 2
+        }
+        
+        Logger.debug("Image scaling - aspect ratios: screen=\(screenAspect), image=\(imageAspect)", category: .imageProcessing)
+        Logger.debug("Scaling factors: x=\(scaleX), y=\(scaleY), offsets: x=\(offsetX), y=\(offsetY)", category: .imageProcessing)
+
         for i in 0..<min(4, lineEndpoints.count) {
             let rel = lineEndpoints[i]
             guard rel.count == 2 else { continue }
-            let p0 = CGPoint(x: rel[0].x * imageSize.width, y: rel[0].y * imageSize.height)
-            let p1 = CGPoint(x: rel[1].x * imageSize.width, y: rel[1].y * imageSize.height)
 
-            // Crop rectangle
-            let minX = max(min(p0.x, p1.x) - padding, 0)
-            let maxX = min(max(p0.x, p1.x) + padding, imageSize.width)
-            let minY = max(min(p0.y, p1.y) - padding, 0)
-            let maxY = min(max(p0.y, p1.y) + padding, imageSize.height)
-            let cropRect = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-            Logger.debug("Crop rect for line \(i): \(cropRect)", category: .imageProcessing)
+            // Convert relative coordinates to image coordinates
+            let p0 = CGPoint(
+                x: rel[0].x * scaleX + offsetX,
+                y: rel[0].y * scaleY + offsetY
+            )
+            let p1 = CGPoint(
+                x: rel[1].x * scaleX + offsetX,
+                y: rel[1].y * scaleY + offsetY
+            )
 
-            guard let cgImage = uiImage.cgImage?.cropping(to: cropRect) else {
-                Logger.error("Failed to crop CGImage for line \(i)", category: .imageProcessing)
+            // Calculate line properties
+            let dx = p1.x - p0.x
+            let dy = p1.y - p0.y
+            let lineLength = sqrt(dx * dx + dy * dy)
+            let padding = paddingEnabled ? max(minPadding, lineLength * paddingRatio) : 5 // Minimum 5 pixels when disabled
+            let angle = atan2(dy, dx)
+            
+            Logger.debug("Line \(i) - length: \(lineLength), padding: \(padding), angle: \(angle * 180 / .pi)°", category: .imageProcessing)
+
+            // Calculate corners of the rotated rectangle
+            let sin = CGFloat(sinf(Float(angle)))
+            let cos = CGFloat(cosf(Float(angle)))
+            
+            // Calculate the four corners of our padded rectangle
+            let halfHeight = padding
+            let halfWidth = (lineLength + 2 * padding) / 2
+            
+            let center = CGPoint(x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2)
+            
+            let corners = [
+                CGPoint(
+                    x: center.x - halfWidth * cos - halfHeight * sin,
+                    y: center.y - halfWidth * sin + halfHeight * cos
+                ),
+                CGPoint(
+                    x: center.x + halfWidth * cos - halfHeight * sin,
+                    y: center.y + halfWidth * sin + halfHeight * cos
+                ),
+                CGPoint(
+                    x: center.x + halfWidth * cos + halfHeight * sin,
+                    y: center.y + halfWidth * sin - halfHeight * cos
+                ),
+                CGPoint(
+                    x: center.x - halfWidth * cos + halfHeight * sin,
+                    y: center.y - halfWidth * sin - halfHeight * cos
+                )
+            ]
+            
+            // Find the bounding box of our rotated rectangle
+            let minX = max(0, corners.map { $0.x }.min() ?? 0)
+            let maxX = min(imageSize.width, corners.map { $0.x }.max() ?? imageSize.width)
+            let minY = max(0, corners.map { $0.y }.min() ?? 0)
+            let maxY = min(imageSize.height, corners.map { $0.y }.max() ?? imageSize.height)
+            
+            // Create a context sized to the bounding box
+            let contextWidth = ceil(maxX - minX)
+            let contextHeight = ceil(maxY - minY)
+            
+            guard contextWidth > 0 && contextHeight > 0 else {
+                Logger.error("Invalid context dimensions: \(contextWidth) x \(contextHeight)", category: .imageProcessing)
                 continue
             }
-            var croppedImage = UIImage(cgImage: cgImage, scale: uiImage.scale, orientation: uiImage.imageOrientation)
-
-            // Deskew (rotate to horizontal)
-            let angle = atan2(p1.y - p0.y, p1.x - p0.x)
-            let degrees = angle * 180 / .pi
-            if let rotated = croppedImage.rotated(by: -degrees) {
-                croppedImage = rotated
+            
+            Logger.debug("Line \(i) crop bounds: (\(minX), \(minY)) to (\(maxX), \(maxY))", category: .imageProcessing)
+            
+            UIGraphicsBeginImageContextWithOptions(CGSize(width: contextWidth, height: contextHeight), false, uiImage.scale)
+            guard let context = UIGraphicsGetCurrentContext() else { continue }
+            
+            // Draw the image offset by the bounding box
+            context.translateBy(x: -minX, y: -minY)
+            uiImage.draw(at: .zero)
+            
+            // Create a path for the rotated rectangle and clip
+            let path = UIBezierPath()
+            path.move(to: corners[0])
+            for i in 1...3 {
+                path.addLine(to: corners[i])
             }
-            tempCrops.append(LineCrop(image: croppedImage, color: colors[i], label: labels[i]))
+            path.close()
+            path.addClip()
+            
+            // Draw the image again after clipping
+            uiImage.draw(at: .zero)
+            
+            guard let croppedImage = UIGraphicsGetImageFromCurrentImageContext() else { continue }
+            UIGraphicsEndImageContext()
+            
+            // Now create a second context to rotate the image to horizontal
+            let finalWidth = lineLength + 2 * padding
+            let finalHeight = 2 * padding
+            
+            Logger.debug("Line \(i) final dimensions: \(finalWidth) x \(finalHeight)", category: .imageProcessing)
+            
+            UIGraphicsBeginImageContextWithOptions(CGSize(width: finalWidth, height: finalHeight), false, uiImage.scale)
+            guard let finalContext = UIGraphicsGetCurrentContext() else { continue }
+            
+            // Set up the transform to position and rotate the image
+            let transform = CGAffineTransform.identity
+                .translatedBy(x: finalWidth / 2, y: finalHeight / 2)
+                .rotated(by: -angle)
+                .translatedBy(x: -center.x + minX, y: -center.y + minY)
+            
+            finalContext.concatenate(transform)
+            croppedImage.draw(at: .zero)
+            
+            guard let finalImage = UIGraphicsGetImageFromCurrentImageContext() else { continue }
+            UIGraphicsEndImageContext()
+            
+            tempCrops.append(LineCrop(image: finalImage, color: colors[i], label: labels[i]))
         }
 
         await MainActor.run {
