@@ -1,5 +1,6 @@
 import UIKit
 import SwiftUI
+import Foundation
 
 struct BallCount {
     var red: Int = 0
@@ -24,17 +25,6 @@ private struct Ball {
     var radius: CGFloat
     
     var isInMiddleZone: Bool = false
-}
-
-private enum BallColor {
-    case red, blue
-    
-    var uiColor: UIColor {
-        switch self {
-        case .red: return VRCColors.red
-        case .blue: return VRCColors.blue
-        }
-    }
 }
 
 private struct WhiteLine {

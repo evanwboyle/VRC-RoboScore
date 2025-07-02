@@ -19,6 +19,10 @@ struct LineCropsView: View {
     @State private var isProcessing: Bool = true
     @State private var showShareSheet: Bool = false
     @State private var paddingEnabled: Bool = true
+    @State private var showDetectionAnalysisView: Bool = false
+    @State private var detectionSession: DetectionSession? = nil
+    @State private var isAnalyzing: Bool = false
+    @State private var analysisError: String? = nil
 
     // MARK: - Constants
     private let minPadding: CGFloat = 20.0 // Minimum padding in pixels
@@ -61,21 +65,78 @@ struct LineCropsView: View {
                     .background(Color.black)
 
                     // Control buttons
-                    HStack(spacing: 24) {
-                        Button(action: undo) {
-                            Label("Back", systemImage: "arrow.left")
-                        }
-                        .buttonStyle(ControlButtonStyle(color: .red))
+                    VStack(spacing: 12) {
+                        HStack(spacing: 24) {
+                            Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                                Label("Back", systemImage: "arrow.left")
+                            }
+                            .buttonStyle(ControlButtonStyle(color: .red))
 
-                        Button(action: saveAll) {
-                            Label("Save", systemImage: "square.and.arrow.down")
-                        }
-                        .buttonStyle(ControlButtonStyle(color: .green))
+                            Button(action: saveAll) {
+                                Label("Save", systemImage: "square.and.arrow.down")
+                            }
+                            .buttonStyle(ControlButtonStyle(color: .green))
 
-                        Button(action: { showShareSheet = true }) {
-                            Label("Export", systemImage: "square.and.arrow.up")
+                            Button(action: { showShareSheet = true }) {
+                                Label("Export", systemImage: "square.and.arrow.up")
+                            }
+                            .buttonStyle(ControlButtonStyle(color: .blue))
+                            
+                            Button(action: {
+                                Task {
+                                    guard !processedCrops.isEmpty else {
+                                        Logger.error("Cannot analyze - no processed crops available", category: .imageProcessing)
+                                        return
+                                    }
+                                    
+                                    Logger.debug("Analyze pressed – starting detection", category: .imageProcessing)
+                                    
+                                    // Reset state
+                                    analysisError = nil
+                                    isAnalyzing = true
+                                    
+                                    do {
+                                        // Add artificial delay to ensure UI updates
+                                        try await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                                        
+                                        let coordinator = BallDetectionCoordinator()
+                                        let session = await coordinator.analyze(croppedImages: processedCrops)
+                                        
+                                        await MainActor.run {
+                                            detectionSession = session
+                                            isAnalyzing = false
+                                            showDetectionAnalysisView = true
+                                        }
+                                        
+                                        Logger.debug("Detection complete - showing analysis view", category: .imageProcessing)
+                                    } catch {
+                                        Logger.error("Detection failed: \(error.localizedDescription)", category: .imageProcessing)
+                                        await MainActor.run {
+                                            analysisError = error.localizedDescription
+                                            isAnalyzing = false
+                                        }
+                                    }
+                                }
+                            }) {
+                                if isAnalyzing {
+                                    HStack {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        Text("Analyzing...")
+                                    }
+                                } else {
+                                    Label("Analyze", systemImage: "magnifyingglass")
+                                }
+                            }
+                            .disabled(isAnalyzing)
+                            .buttonStyle(ControlButtonStyle(color: .purple))
                         }
-                        .buttonStyle(ControlButtonStyle(color: .blue))
+                        
+                        if let error = analysisError {
+                            Text(error)
+                                .foregroundColor(.red)
+                                .font(.caption)
+                        }
                         
                         Button(action: {
                             paddingEnabled.toggle()
@@ -93,6 +154,13 @@ struct LineCropsView: View {
                 .sheet(isPresented: $showShareSheet) {
                     ImageShareSheet(images: processedCrops.map { $0.image })
                 }
+                .sheet(isPresented: $showDetectionAnalysisView) {
+                    if let session = detectionSession {
+                        NavigationView {
+                            DetectionAnalysisView(session: session)
+                        }
+                    }
+                }
             }
         }
         .onAppear {
@@ -103,11 +171,6 @@ struct LineCropsView: View {
     }
 
     // MARK: - Actions
-
-    private func undo() {
-        Logger.debug("Undo pressed – dismissing LineCropsView", category: .navigation)
-        presentationMode.wrappedValue.dismiss()
-    }
 
     private func saveAll() {
         Logger.debug("Saving all cropped images to photo library", category: .export)
