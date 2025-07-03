@@ -54,6 +54,7 @@ struct CalculatorView: View {
     @StateObject private var appSettings = AppSettingsManager.shared
     @State private var showingCamera = false
     @State private var showingMultiGoalCamera = false
+    @State private var showingFieldCamera = false
     @State private var showingShareSheet = false
     @State private var scoreToShare = ""
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
@@ -130,6 +131,12 @@ struct CalculatorView: View {
                 },
                 trailing: HStack {
                     Button(action: {
+                        showingFieldCamera = true
+                    }) {
+                        Image(systemName: "viewfinder.circle")
+                            .accessibilityLabel("Field Camera")
+                    }
+                    Button(action: {
                         showingMultiGoalCamera = true
                     }) {
                         ZStack {
@@ -167,6 +174,9 @@ struct CalculatorView: View {
                         dismissButton: .default(Text("OK"))
                     )
                 }
+            }
+            .fullScreenCover(isPresented: $showingFieldCamera) {
+                FieldCameraView()
             }
             .fullScreenCover(isPresented: $showingCamera) {
                 CameraView()

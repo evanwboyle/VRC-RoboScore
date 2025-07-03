@@ -33,6 +33,11 @@ private struct WhiteLine {
     var pixels: Set<CGPoint>
 }
 
+private struct WhitePixelConversion {
+    var point: CGPoint
+    var convertedColor: BallColor
+}
+
 class BallCounter {
     static let maxTotalBalls = 15
     
@@ -44,6 +49,11 @@ class BallCounter {
         var whiteMergeThreshold: Int = 20  // Number of adjacent colored pixels to merge white region
         var imageScale: CGFloat = 0.33     // Scale factor to downsample image for faster processing
         var ballAreaPercentage: Double = 30.0  // Percentage of theoretical ball area needed to count as a ball
+        var maxBallsInCluster: Int = 3     // Maximum number of balls to detect in a single cluster
+        var clusterSplitThreshold: CGFloat = 1.8  // Width/height ratio threshold for splitting clusters
+        var minClusterSeparation: CGFloat = 0.8   // Minimum separation between ball centers as a fraction of ball diameter
+        var whitePixelConversionDistance: Int = 5  // Distance to check for colored pixels around white pixels
+        var coloredPixelThreshold: Int = 10        // Number of colored pixels needed to convert white pixels
     }
     
     private var params: Parameters
@@ -54,6 +64,8 @@ class BallCounter {
     private var detectedBalls: [Ball] = []
     private var middleZoneStart: Int = 0
     private var middleZoneEnd: Int = 0
+    
+    private var whitePixelConversions: [WhitePixelConversion] = []
     
     init(parameters: Parameters = Parameters()) {
         self.params = parameters
@@ -123,6 +135,9 @@ class BallCounter {
         
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
         
+        // Process white pixels that should be considered colored
+        processWhitePixels(in: pixelData)
+        
         // First, find white lines in middle half horizontally of image
         let middleStartX = imageWidth / 4  // Only search middle half horizontally
         let middleEndX = imageWidth * 3 / 4
@@ -170,28 +185,35 @@ class BallCounter {
                     let cluster = findCluster(at: CGPoint(x: x, y: y), color: color!, in: pixelData)
                     
                     if cluster.pixels.count >= minPixelsForBall {
-                        let centerScaled = calculateClusterCenter(cluster.pixels)
-                        let center = CGPoint(x: centerScaled.x / params.imageScale, y: centerScaled.y / params.imageScale)
+                        let analysis = analyzeCluster(cluster, ballRadius: ballRadius)
                         
-                        // Check if ball is between white lines (use scaled coordinates)
-                        let isInMiddle = middleLines.count == 2 &&
-                            centerScaled.x > min(middleLines[0].xPosition, middleLines[1].xPosition) &&
-                            centerScaled.x < max(middleLines[0].xPosition, middleLines[1].xPosition) &&
-                            !doesBallIntersectLines(center: centerScaled, radius: ballRadius, lines: middleLines)
-                        
-                        if appSettings.debugMode {
-                            print("\nDEBUG: Ball Detection Details:")
-                            print("Ball position (scaled): \(centerScaled)")
-                            print("Color: \(cluster.color)")
-                            print("Middle line check result: \(isInMiddle)")
-                            print("Line positions: \(middleLines.map { $0.xPosition })")
+                        for centerScaled in analysis.centers {
+                            let center = CGPoint(x: centerScaled.x / params.imageScale,
+                                               y: centerScaled.y / params.imageScale)
+                            
+                            // Check if ball is between white lines (use scaled coordinates)
+                            let isInMiddle = middleLines.count == 2 &&
+                                centerScaled.x > min(middleLines[0].xPosition, middleLines[1].xPosition) &&
+                                centerScaled.x < max(middleLines[0].xPosition, middleLines[1].xPosition) &&
+                                !doesBallIntersectLines(center: centerScaled, radius: ballRadius, lines: middleLines)
+                            
+                            if appSettings.debugMode {
+                                print("\nDEBUG: Ball Detection Details:")
+                                print("Ball position (scaled): \(centerScaled)")
+                                print("Color: \(analysis.color)")
+                                print("Middle line check result: \(isInMiddle)")
+                                print("Line positions: \(middleLines.map { $0.xPosition })")
+                            }
+                            
+                            let ball = Ball(center: center,
+                                           color: analysis.color,
+                                           radius: ballRadius / params.imageScale,
+                                           isInMiddleZone: isInMiddle)
+                            detectedBalls.append(ball)
+                            
+                            let exclusionRadius = ballRadius * params.exclusionRadiusMultiplier
+                            addExclusionZone(center: centerScaled, radius: exclusionRadius)
                         }
-                        
-                        let ball = Ball(center: center, color: cluster.color, radius: ballRadius / params.imageScale, isInMiddleZone: isInMiddle)
-                        detectedBalls.append(ball)
-                        
-                        let exclusionRadius = ballRadius * params.exclusionRadiusMultiplier
-                        addExclusionZone(center: centerScaled, radius: exclusionRadius)
                     }
                 }
             }
@@ -490,6 +512,21 @@ class BallCounter {
             context.strokePath()
         }
         
+        // Draw converted white pixels
+        for conversion in whitePixelConversions {
+            let fillColor = conversion.convertedColor == .red ?
+                UIColor(red: 1.0, green: 0.0, blue: 0.0, alpha: 0.3) : // Semi-transparent red
+                UIColor(red: 0.0, green: 0.0, blue: 1.0, alpha: 0.3)   // Semi-transparent blue
+            
+            context.setFillColor(fillColor.cgColor)
+            let size: CGFloat = 3.0
+            let rect = CGRect(x: conversion.point.x * scaleInv - size/2,
+                             y: conversion.point.y * scaleInv - size/2,
+                             width: size,
+                             height: size)
+            context.fillEllipse(in: rect)
+        }
+        
         return UIGraphicsGetImageFromCurrentImageContext()
     }
     
@@ -623,6 +660,115 @@ class BallCounter {
             reason: reason,
             inspectedPoint: point
         )
+    }
+    
+    private struct ClusterAnalysis {
+        var centers: [CGPoint]
+        var color: BallColor
+    }
+    
+    private func analyzeCluster(_ cluster: Cluster, ballRadius: CGFloat) -> ClusterAnalysis {
+        let pixels = Array(cluster.pixels)
+        var centers: [CGPoint] = []
+        
+        // Get cluster bounds
+        let minX = pixels.map { $0.x }.min() ?? 0
+        let maxX = pixels.map { $0.x }.max() ?? 0
+        let minY = pixels.map { $0.y }.min() ?? 0
+        let maxY = pixels.map { $0.y }.max() ?? 0
+        
+        let width = maxX - minX
+        let height = maxY - minY
+        let aspectRatio = width / height
+        
+        if aspectRatio >= params.clusterSplitThreshold {
+            // Cluster is wide enough to potentially contain multiple balls
+            let potentialBallCount = min(Int(aspectRatio), params.maxBallsInCluster)
+            let segmentWidth = width / CGFloat(potentialBallCount)
+            
+            // Create segments and find centers
+            for i in 0..<potentialBallCount {
+                let segmentStart = minX + segmentWidth * CGFloat(i)
+                let segmentEnd = segmentStart + segmentWidth
+                
+                // Get pixels in this segment
+                let segmentPixels = pixels.filter { $0.x >= segmentStart && $0.x < segmentEnd }
+                if !segmentPixels.isEmpty {
+                    let segmentCenter = calculateClusterCenter(Set(segmentPixels))
+                    
+                    // Check if this center is far enough from other centers
+                    let isFarEnough = centers.allSatisfy { existingCenter in
+                        let distance = CGPoint(x: existingCenter.x - segmentCenter.x,
+                                             y: existingCenter.y - segmentCenter.y).length
+                        return distance >= (2 * ballRadius * params.minClusterSeparation)
+                    }
+                    
+                    if isFarEnough {
+                        centers.append(segmentCenter)
+                    }
+                }
+            }
+        }
+        
+        // If no split was possible or necessary, use the cluster center
+        if centers.isEmpty {
+            centers = [calculateClusterCenter(cluster.pixels)]
+        }
+        
+        return ClusterAnalysis(centers: centers, color: cluster.color)
+    }
+    
+    private func findColoredPixelsAround(point: CGPoint, color: BallColor, distance: Int, in pixelData: [UInt8]) -> Int {
+        var count = 0
+        let x = Int(point.x)
+        let y = Int(point.y)
+        
+        for dx in -distance...distance {
+            for dy in -distance...distance {
+                let newX = x + dx
+                let newY = y + dy
+                
+                if newX >= 0 && newX < imageWidth && newY >= 0 && newY < imageHeight {
+                    let pixelIndex = (newY * imageWidth + newX) * 4
+                    if getPixelColor(data: pixelData, index: pixelIndex) == color {
+                        count += 1
+                    }
+                }
+            }
+        }
+        
+        return count
+    }
+    
+    private func processWhitePixels(in pixelData: [UInt8]) {
+        whitePixelConversions.removeAll()
+        
+        for y in 0..<imageHeight {
+            for x in 0..<imageWidth {
+                let pixelIndex = (y * imageWidth + x) * 4
+                if isWhitePixel(data: pixelData, index: pixelIndex) {
+                    let point = CGPoint(x: x, y: y)
+                    
+                    // Check for nearby red pixels
+                    let redCount = findColoredPixelsAround(point: point, 
+                                                         color: .red, 
+                                                         distance: params.whitePixelConversionDistance, 
+                                                         in: pixelData)
+                    
+                    // Check for nearby blue pixels
+                    let blueCount = findColoredPixelsAround(point: point, 
+                                                          color: .blue, 
+                                                          distance: params.whitePixelConversionDistance, 
+                                                          in: pixelData)
+                    
+                    if redCount >= params.coloredPixelThreshold && redCount > blueCount {
+                        whitePixelConversions.append(WhitePixelConversion(point: point, convertedColor: .red))
+                    } else if blueCount >= params.coloredPixelThreshold && blueCount > redCount {
+                        whitePixelConversions.append(WhitePixelConversion(point: point, convertedColor: .blue))
+                    }
+                }
+            }
+        }
     }
 }
 

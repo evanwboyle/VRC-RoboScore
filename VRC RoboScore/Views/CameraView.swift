@@ -38,6 +38,11 @@ struct CameraView: View {
     @State private var ballCounts = ZoneCounts()
     @State private var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)? = nil
     
+    @State private var lastCapturedImage: UIImage? = nil
+    @State private var isProcessing: Bool = false
+    @State private var whitePixelConversionDistance: Double = 5.0
+    @State private var coloredPixelThreshold: Double = 10.0
+    
     private var magnificationGesture: some Gesture {
         MagnificationGesture()
             .onChanged { value in
@@ -173,7 +178,9 @@ struct CameraView: View {
                                 exclusionRadiusMultiplier: $exclusionRadiusMultiplier,
                                 ballAreaPercentage: $ballAreaPercentage,
                                 ballCounts: $ballCounts,
-                                currentDetectionResult: $currentDetectionResult
+                                currentDetectionResult: $currentDetectionResult,
+                                whitePixelConversionDistance: $whitePixelConversionDistance,
+                                coloredPixelThreshold: $coloredPixelThreshold
                             )
                         }
                     }
@@ -397,6 +404,85 @@ struct CameraView: View {
         
         return UIImage(cgImage: cgImage)
     }
+    
+    private var settingsSection: some View {
+        Section(header: Text("Detection Settings")) {
+            VStack(alignment: .leading) {
+                Text("White Pixel Conversion Distance: \(Int(whitePixelConversionDistance))")
+                if #available(iOS 17.0, *) {
+                    Slider(value: $whitePixelConversionDistance, in: 1...20, step: 1)
+                        .onChange(of: whitePixelConversionDistance) { _, _ in
+                            if let lastImage = lastCapturedImage {
+                                runDetection(on: lastImage, isManualUpdate: true)
+                            }
+                        }
+                } else {
+                    Slider(value: $whitePixelConversionDistance, in: 1...20, step: 1)
+                        .onChange(of: whitePixelConversionDistance) { _ in
+                            if let lastImage = lastCapturedImage {
+                                runDetection(on: lastImage, isManualUpdate: true)
+                            }
+                        }
+                }
+            }
+            VStack(alignment: .leading) {
+                Text("Colored Pixel Threshold: \(Int(coloredPixelThreshold))")
+                if #available(iOS 17.0, *) {
+                    Slider(value: $coloredPixelThreshold, in: 1...50, step: 1)
+                        .onChange(of: coloredPixelThreshold) { _, _ in
+                            if let lastImage = lastCapturedImage {
+                                runDetection(on: lastImage, isManualUpdate: true)
+                            }
+                        }
+                } else {
+                    Slider(value: $coloredPixelThreshold, in: 1...50, step: 1)
+                        .onChange(of: coloredPixelThreshold) { _ in
+                            if let lastImage = lastCapturedImage {
+                                runDetection(on: lastImage, isManualUpdate: true)
+                            }
+                        }
+                }
+            }
+        }
+    }
+    
+    private func runDetection(on image: UIImage, isManualUpdate: Bool = false) {
+        lastCapturedImage = image
+        guard !isProcessing else { return }
+        isProcessing = true
+        
+        if appSettings.debugMode {
+            print("DEBUG: \(isManualUpdate ? "Manual" : "Auto") detection requested")
+        }
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            var params = BallCounter.Parameters(
+                minWhiteLineSize: Int(50.0 * regionSensitivity),
+                ballRadiusRatio: CGFloat(ballRadiusRatio),
+                exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
+                whiteMergeThreshold: 20,
+                imageScale: 1.0,
+                ballAreaPercentage: ballAreaPercentage
+            )
+            params.whitePixelConversionDistance = Int(whitePixelConversionDistance)
+            params.coloredPixelThreshold = Int(coloredPixelThreshold)
+            let detector = BallCounter(parameters: params)
+            let result = detector.detectBalls(in: image)
+            
+            DispatchQueue.main.async {
+                withAnimation {
+                    currentDetectionResult = result
+                    ballCounts = result.zoneCounts
+                    
+                    if appSettings.debugMode {
+                        print("DEBUG: Ball counts updated - Middle: Red=\(ballCounts.middle.red), Blue=\(ballCounts.middle.blue)")
+                        print("DEBUG: Ball counts updated - Outside: Red=\(ballCounts.outside.red), Blue=\(ballCounts.outside.blue)")
+                    }
+                }
+                isProcessing = false
+            }
+        }
+    }
 }
 
 // MARK: - Apple Style Button
@@ -563,10 +649,43 @@ class CustomCameraViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         videoPreviewLayer.frame = view.bounds
-        if rotateCapturedImage90Degrees {
-            videoPreviewLayer.connection?.videoOrientation = .landscapeRight
-        } else {
-            videoPreviewLayer.connection?.videoOrientation = .portrait
+        if let connection = videoPreviewLayer.connection {
+            let orientation = UIDevice.current.orientation
+            if #available(iOS 17.0, *) {
+                let angle: Double?
+                switch orientation {
+                case .portrait:
+                    angle = 90
+                case .portraitUpsideDown:
+                    angle = 270
+                case .landscapeLeft:
+                    angle = 0
+                case .landscapeRight:
+                    angle = 180
+                default:
+                    angle = nil
+                }
+                if let angle, connection.isVideoRotationAngleSupported(angle) {
+                    connection.videoRotationAngle = angle
+                }
+            } else {
+                let videoOrientation: AVCaptureVideoOrientation?
+                switch orientation {
+                case .portrait:
+                    videoOrientation = .portrait
+                case .portraitUpsideDown:
+                    videoOrientation = .portraitUpsideDown
+                case .landscapeLeft:
+                    videoOrientation = .landscapeRight
+                case .landscapeRight:
+                    videoOrientation = .landscapeLeft
+                default:
+                    videoOrientation = nil
+                }
+                if let videoOrientation, connection.isVideoOrientationSupported {
+                    connection.videoOrientation = videoOrientation
+                }
+            }
         }
     }
     
@@ -906,6 +1025,8 @@ struct QuantizedImageSection: View {
     @Binding var ballAreaPercentage: Double
     @Binding var ballCounts: ZoneCounts
     @Binding var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)?
+    @Binding var whitePixelConversionDistance: Double
+    @Binding var coloredPixelThreshold: Double
     @StateObject private var appSettings = AppSettingsManager.shared
     @State private var isProcessing: Bool = false
     
@@ -923,14 +1044,17 @@ struct QuantizedImageSection: View {
         }
         
         DispatchQueue.global(qos: .userInitiated).async {
-            let detector = BallCounter(parameters: .init(
+            var params = BallCounter.Parameters(
                 minWhiteLineSize: Int(50.0 * regionSensitivity),
                 ballRadiusRatio: CGFloat(ballRadiusRatio),
                 exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
                 whiteMergeThreshold: 20,
                 imageScale: 1.0,
                 ballAreaPercentage: ballAreaPercentage
-            ))
+            )
+            params.whitePixelConversionDistance = Int(whitePixelConversionDistance)
+            params.coloredPixelThreshold = Int(coloredPixelThreshold)
+            let detector = BallCounter(parameters: params)
             let result = detector.detectBalls(in: image)
             
             DispatchQueue.main.async {
@@ -960,7 +1084,7 @@ struct QuantizedImageSection: View {
                 blueThreshold: blueThreshold,
                 whiteThreshold: whiteThreshold
             ) {
-                Image(uiImage: quantizedImage)
+                let quantizedImageView = Image(uiImage: quantizedImage)
                     .resizable()
                     .scaledToFit()
                     .frame(maxWidth: .infinity)
@@ -971,9 +1095,15 @@ struct QuantizedImageSection: View {
                             runDetection(on: quantizedImage)
                         }
                     }
+                    #if swift(>=5.9)
+                    .onChange(of: redThreshold) { _, _ in updateDetection(quantizedImage) }
+                    .onChange(of: blueThreshold) { _, _ in updateDetection(quantizedImage) }
+                    .onChange(of: whiteThreshold) { _, _ in updateDetection(quantizedImage) }
+                    #else
                     .onChange(of: redThreshold) { _ in updateDetection(quantizedImage) }
                     .onChange(of: blueThreshold) { _ in updateDetection(quantizedImage) }
                     .onChange(of: whiteThreshold) { _ in updateDetection(quantizedImage) }
+                    #endif
                     .overlay(
                         Group {
                             if isProcessing {
@@ -983,7 +1113,7 @@ struct QuantizedImageSection: View {
                             }
                         }
                     )
-                
+                quantizedImageView
                 // Threshold controls
                 ThresholdControlsSection(
                     showThresholdControls: $showThresholdControls,
