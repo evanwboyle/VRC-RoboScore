@@ -1,0 +1,6 @@
+---
+description: 
+globs: *.pbxproj
+alwaysApply: false
+---
+Never edit files ending in .pbxproj. Instead, tell the user how to change these through XCode's UI.

@@ -567,6 +567,7 @@ struct CustomCameraView: UIViewControllerRepresentable {
     var rotateCapturedImage90Degrees: Bool = false
     var hideNeonLine: Bool = false
     var shutterVerticalFraction: CGFloat = 1.0
+    var hideControls: Bool = false
     
     func makeUIViewController(context: Context) -> CustomCameraViewController {
         let controller = CustomCameraViewController()
@@ -575,10 +576,14 @@ struct CustomCameraView: UIViewControllerRepresentable {
         controller.rotateCapturedImage90Degrees = rotateCapturedImage90Degrees
         controller.hideNeonLine = hideNeonLine
         controller.shutterVerticalFraction = shutterVerticalFraction
+        controller.hideControls = hideControls
         return controller
     }
     
-    func updateUIViewController(_ uiViewController: CustomCameraViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: CustomCameraViewController, context: Context) {
+        uiViewController.hideControls = hideControls
+        uiViewController.updateControlVisibility()
+    }
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -621,6 +626,10 @@ class CustomCameraViewController: UIViewController {
     var rotateCapturedImage90Degrees: Bool = false
     var hideNeonLine: Bool = false
     var shutterVerticalFraction: CGFloat = 1.0
+    var hideControls: Bool = false
+
+    // Track last valid (non-flat) orientation
+    private var lastValidOrientation: UIDeviceOrientation = .landscapeLeft
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -650,7 +659,13 @@ class CustomCameraViewController: UIViewController {
         super.viewDidLayoutSubviews()
         videoPreviewLayer.frame = view.bounds
         if let connection = videoPreviewLayer.connection {
-            let orientation = UIDevice.current.orientation
+            var orientation = UIDevice.current.orientation
+            // If device is flat, use last valid orientation
+            if orientation == .faceUp || orientation == .faceDown {
+                orientation = lastValidOrientation
+            } else if orientation.isValidInterfaceOrientation {
+                lastValidOrientation = orientation
+            }
             if #available(iOS 17.0, *) {
                 let angle: Double?
                 switch orientation {
@@ -747,6 +762,7 @@ class CustomCameraViewController: UIViewController {
     private func setupUI() {
         view.backgroundColor = .black
         
+        // Always create controls but set initial visibility
         // Capture button
         captureButton.backgroundColor = .white
         captureButton.layer.cornerRadius = 35
@@ -774,6 +790,7 @@ class CustomCameraViewController: UIViewController {
         view.addSubview(flashButton)
         
         setupConstraints()
+        updateControlVisibility()
     }
     
     private func setupConstraints() {
@@ -784,15 +801,15 @@ class CustomCameraViewController: UIViewController {
         neonLineView.translatesAutoresizingMaskIntoConstraints = false
 
         if useWideCamera && rotateCapturedImage90Degrees {
-            // Landscape: capture button right, at shutterVerticalFraction height
+            // Landscape: capture button right, centered vertically
             NSLayoutConstraint.activate([
                 captureButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -30),
-                captureButton.centerYAnchor.constraint(equalTo: view.topAnchor, constant: view.bounds.height * shutterVerticalFraction),
+                captureButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
                 captureButton.widthAnchor.constraint(equalToConstant: 70),
                 captureButton.heightAnchor.constraint(equalToConstant: 70),
 
-                photoLibraryButton.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
-                photoLibraryButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 30),
+                photoLibraryButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                photoLibraryButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 60),
                 photoLibraryButton.widthAnchor.constraint(equalToConstant: 44),
                 photoLibraryButton.heightAnchor.constraint(equalToConstant: 44),
 
@@ -804,14 +821,6 @@ class CustomCameraViewController: UIViewController {
                 flashButton.widthAnchor.constraint(equalToConstant: 44),
                 flashButton.heightAnchor.constraint(equalToConstant: 44)
             ])
-            if !hideNeonLine {
-                NSLayoutConstraint.activate([
-                    neonLineView.topAnchor.constraint(equalTo: view.topAnchor),
-                    neonLineView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                    neonLineView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                    neonLineView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-                ])
-            }
         } else {
             NSLayoutConstraint.activate([
                 // Capture button
@@ -833,15 +842,25 @@ class CustomCameraViewController: UIViewController {
                 flashButton.widthAnchor.constraint(equalToConstant: 44),
                 flashButton.heightAnchor.constraint(equalToConstant: 44)
             ])
-            if !hideNeonLine {
-                NSLayoutConstraint.activate([
-                    neonLineView.topAnchor.constraint(equalTo: view.topAnchor),
-                    neonLineView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                    neonLineView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                    neonLineView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-                ])
-            }
         }
+        
+        if !hideNeonLine {
+            NSLayoutConstraint.activate([
+                neonLineView.topAnchor.constraint(equalTo: view.topAnchor),
+                neonLineView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                neonLineView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                neonLineView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            ])
+        }
+    }
+    
+    func updateControlVisibility() {
+        let isHidden = hideControls
+        captureButton.isHidden = isHidden
+        photoLibraryButton.isHidden = isHidden
+        flashButton.isHidden = isHidden
+        // Hide cancel button when controls are hidden (we provide a SwiftUI one above overlay)
+        cancelButton.isHidden = isHidden
     }
     
     @objc private func toggleFlash() {
@@ -888,7 +907,10 @@ extension CustomCameraViewController: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let imageData = photo.fileDataRepresentation(),
            var image = UIImage(data: imageData) {
-            if rotateCapturedImage90Degrees {
+            // Patch: If device was in landscapeRight, rotate image 90 degrees
+            if UIDevice.current.orientation == .landscapeRight {
+                image = image.rotated(by: 90) ?? image
+            } else if rotateCapturedImage90Degrees {
                 image = image.rotated(by: -90) ?? image
             }
             delegate?.didCaptureImage(image)
@@ -1323,6 +1345,18 @@ extension UIImage {
         let rotatedImage = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
         return rotatedImage
+    }
+}
+
+// Helper extension for valid interface orientation
+private extension UIDeviceOrientation {
+    var isValidInterfaceOrientation: Bool {
+        switch self {
+        case .portrait, .portraitUpsideDown, .landscapeLeft, .landscapeRight:
+            return true
+        default:
+            return false
+        }
     }
 }
 
