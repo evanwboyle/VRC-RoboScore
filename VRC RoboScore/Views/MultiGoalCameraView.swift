@@ -23,6 +23,13 @@ struct MultiGoalCameraView: View {
     // 1. At the top of MultiGoalCameraView, add haptic generators
     @State private var hapticMedium = UIImpactFeedbackGenerator(style: .medium)
     
+    // Add a @State variable to store the true visible area size
+    @State private var visibleAreaSize: CGSize = .zero
+    
+    // MARK: - Constants
+    private let perpendicularPaddings: [CGFloat] = [13, 30, 16, 16] // red, green, blue, orange
+    private let outwardPadding: CGFloat = 10.0 // Padding at the ends of the line (along the line direction)
+    
     var body: some View {
         ZStack {
             OrientationReader { landscape, orientation in
@@ -31,12 +38,16 @@ struct MultiGoalCameraView: View {
             }
             if let image = capturedImage {
                 GeometryReader { screenGeometry in
+                    let trueSize = screenGeometry.size
+                    Color.clear
+                        .onAppear { visibleAreaSize = trueSize }
+                        .onChange(of: screenGeometry.size) { newSize in visibleAreaSize = newSize }
                     ZStack(alignment: .center) {
                         Color.black.edgesIgnoringSafeArea(.all)
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
-                            .frame(width: screenGeometry.size.width, height: screenGeometry.size.height)
+                            .frame(width: trueSize.width, height: trueSize.height)
                             .clipped()
                         // Editable lines
                         ForEach(0..<lineEndpoints.count, id: \.self) { i in
@@ -75,8 +86,11 @@ struct MultiGoalCameraView: View {
                                         } else if let dragging = dragging, let dragStart = dragStart, let dragStartEndpoint = dragStartEndpoint, dragActive {
                                             // Update the dragged endpoint
                                             let delta = CGPoint(x: value.location.x - dragStart.x, y: value.location.y - dragStart.y)
-                                            let newX = dragStartEndpoint.x + delta.x
-                                            let newY = dragStartEndpoint.y + delta.y
+                                            var newX = dragStartEndpoint.x + delta.x
+                                            var newY = dragStartEndpoint.y + delta.y
+                                            // Clamp to visible area
+                                            newX = min(max(newX, 0), visibleAreaSize.width)
+                                            newY = min(max(newY, 0), visibleAreaSize.height)
                                             lineEndpoints[dragging.line][dragging.point] = CGPoint(x: newX, y: newY)
                                         }
                                     }
@@ -92,11 +106,11 @@ struct MultiGoalCameraView: View {
                                     }
                             )
                     }
-                    .frame(width: screenGeometry.size.width, height: screenGeometry.size.height)
+                    .frame(width: trueSize.width, height: trueSize.height)
                     .onAppear {
                         // Only initialize endpoints if in landscape
                         if isLandscape && lineEndpoints.isEmpty {
-                            let defaults = initializeEndpoints(for: screenGeometry.size)
+                            let defaults = initializeEndpoints(for: trueSize)
                             lineEndpoints = defaults
                             defaultLineEndpoints = defaults
                         }
@@ -104,7 +118,7 @@ struct MultiGoalCameraView: View {
                     .onChange(of: isLandscape) { newIsLandscape in
                         // If switching to landscape, re-initialize endpoints for correct geometry
                         if newIsLandscape {
-                            let defaults = initializeEndpoints(for: screenGeometry.size)
+                            let defaults = initializeEndpoints(for: trueSize)
                             lineEndpoints = defaults
                             defaultLineEndpoints = defaults
                         }
@@ -135,20 +149,26 @@ struct MultiGoalCameraView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     // Preview overlay
                     if showPreview {
-                        PreviewCropRectangles(
-                            image: image,
-                            lineEndpoints: lineEndpoints,
-                            colors: lineColors,
-                            screenSize: screenGeometry.size
-                        )
+                        VStack {
+                            PreviewCropRectangles(
+                                image: image,
+                                lineEndpoints: lineEndpoints,
+                                colors: lineColors,
+                                screenSize: screenGeometry.size,
+                                outwardPadding: outwardPadding,
+                                perpendicularPaddings: perpendicularPaddings
+                            )
+                        }
                     }
                 }
                 .edgesIgnoringSafeArea(.all)
                 .fullScreenCover(isPresented: $showLineCropsView) {
-                    if let img = capturedImage {
-                        GeometryReader { geometry in
-                            LineCropsView(originalImage: img, lineEndpoints: lineEndpoints, screenSize: geometry.size)
-                        }
+                    if let img = capturedImage, visibleAreaSize.width > 0, visibleAreaSize.height > 0 {
+                        LineCropsView(originalImage: img, lineEndpoints: lineEndpoints, screenSize: visibleAreaSize)
+                    } else {
+                        ProgressView("Loading…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color.black)
                     }
                 }
             } else {
@@ -384,14 +404,14 @@ struct LandscapePopup: View {
     }
 }
 
+// 3. Update PreviewCropRectangles to accept outwardPadding and perpendicularPadding as parameters and use them in its drawing logic
 struct PreviewCropRectangles: View {
     let image: UIImage
     let lineEndpoints: [[CGPoint]]
     let colors: [Color]
     let screenSize: CGSize
-    
-    private let paddingRatio: CGFloat = 0.05 // 5% of line length
-    private let minPadding: CGFloat = 20.0
+    let outwardPadding: CGFloat
+    let perpendicularPaddings: [CGFloat]
     
     var body: some View {
         GeometryReader { _ in
@@ -406,21 +426,15 @@ struct PreviewCropRectangles: View {
                         x: rel[1].x,
                         y: rel[1].y
                     )
-                    
                     let dx = p1.x - p0.x
                     let dy = p1.y - p0.y
                     let lineLength = sqrt(dx * dx + dy * dy)
-                    let padding = max(minPadding, lineLength * paddingRatio)
                     let angle = atan2(dy, dx)
-                    
                     let sin = CGFloat(sinf(Float(angle)))
                     let cos = CGFloat(cosf(Float(angle)))
-                    
-                    let halfHeight = padding
-                    let halfWidth = (lineLength + 2 * padding) / 2
-                    
+                    let halfHeight = perpendicularPaddings[i]
+                    let halfWidth = (lineLength / 2) + outwardPadding
                     let center = CGPoint(x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2)
-                    
                     let corners = [
                         CGPoint(
                             x: center.x - halfWidth * cos - halfHeight * sin,
@@ -439,7 +453,6 @@ struct PreviewCropRectangles: View {
                             y: center.y - halfWidth * sin - halfHeight * cos
                         )
                     ]
-                    
                     Path { path in
                         // Draw the rotated rectangle
                         path.move(to: corners[0])
