@@ -144,31 +144,31 @@ class BallCounter {
         // For short pipes, skip white line detection
         var middleLines: [WhiteLine] = []
         if !isShort {
-            // First, find white lines in middle half horizontally of image
-            let middleStartX = imageWidth / 4  // Only search middle half horizontally
-            let middleEndX = imageWidth * 3 / 4
-            var whiteLines: [WhiteLine] = []
-            
-            // Reset visited array for white line detection
-            visited = Array(repeating: false, count: imageWidth * imageHeight)
-            
-            for y in 0..<imageHeight {
-                for x in middleStartX..<middleEndX {
-                    let idx = vIndex(x: x, y: y)
-                    if visited[idx] { continue }
-                    
-                    let pixelIndex = (y * imageWidth + x) * bytesPerPixel
-                    if isWhitePixel(data: pixelData, index: pixelIndex) {
-                        let cluster = findWhiteCluster(at: CGPoint(x: x, y: y), in: pixelData)
-                        if cluster.pixels.count > params.minWhiteLineSize {
-                            whiteLines.append(findWhiteLine(from: cluster))
-                        }
+        // First, find white lines in middle half horizontally of image
+        let middleStartX = imageWidth / 4  // Only search middle half horizontally
+        let middleEndX = imageWidth * 3 / 4
+        var whiteLines: [WhiteLine] = []
+        
+        // Reset visited array for white line detection
+        visited = Array(repeating: false, count: imageWidth * imageHeight)
+        
+        for y in 0..<imageHeight {
+            for x in middleStartX..<middleEndX {
+                let idx = vIndex(x: x, y: y)
+                if visited[idx] { continue }
+                
+                let pixelIndex = (y * imageWidth + x) * bytesPerPixel
+                if isWhitePixel(data: pixelData, index: pixelIndex) {
+                    let cluster = findWhiteCluster(at: CGPoint(x: x, y: y), in: pixelData)
+                    if cluster.pixels.count > params.minWhiteLineSize {
+                        whiteLines.append(findWhiteLine(from: cluster))
                     }
                 }
             }
-            
-            // Sort white lines by size and get the two largest
-            whiteLines.sort { $0.pixels.count > $1.pixels.count }
+        }
+        
+        // Sort white lines by size and get the two largest
+        whiteLines.sort { $0.pixels.count > $1.pixels.count }
             middleLines = Array(whiteLines.prefix(2))
         }
         
@@ -244,32 +244,32 @@ class BallCounter {
                 }
             }
         } else {
-            for ball in detectedBalls {
-                if appSettings.debugMode {
-                    print("DEBUG: Processing ball at \(ball.center) - Color: \(ball.color), IsMiddle: \(ball.isInMiddleZone)")
-                }
-                if ball.isInMiddleZone {
-                    if ball.color == .red {
-                        counts.middle.red += 1
-                        if appSettings.debugMode {
-                            print("DEBUG: Counted as middle red")
-                        }
-                    } else {
-                        counts.middle.blue += 1
-                        if appSettings.debugMode {
-                            print("DEBUG: Counted as middle blue")
-                        }
+        for ball in detectedBalls {
+            if appSettings.debugMode {
+                print("DEBUG: Processing ball at \(ball.center) - Color: \(ball.color), IsMiddle: \(ball.isInMiddleZone)")
+            }
+            if ball.isInMiddleZone {
+                if ball.color == .red {
+                    counts.middle.red += 1
+                    if appSettings.debugMode {
+                        print("DEBUG: Counted as middle red")
                     }
                 } else {
-                    if ball.color == .red {
-                        counts.outside.red += 1
-                        if appSettings.debugMode {
-                            print("DEBUG: Counted as outside red")
-                        }
-                    } else {
-                        counts.outside.blue += 1
-                        if appSettings.debugMode {
-                            print("DEBUG: Counted as outside blue")
+                    counts.middle.blue += 1
+                    if appSettings.debugMode {
+                        print("DEBUG: Counted as middle blue")
+                    }
+                }
+            } else {
+                if ball.color == .red {
+                    counts.outside.red += 1
+                    if appSettings.debugMode {
+                        print("DEBUG: Counted as outside red")
+                    }
+                } else {
+                    counts.outside.blue += 1
+                    if appSettings.debugMode {
+                        print("DEBUG: Counted as outside blue")
                         }
                     }
                 }

@@ -3,6 +3,7 @@ import UIKit
 import Photos
 import OSLog
 import CoreGraphics
+import Foundation
 
 struct LineCrop {
     let image: UIImage
@@ -11,6 +12,11 @@ struct LineCrop {
 }
 
 // Add these helper functions before the main struct or as extensions
+
+// Move this to the top-level, before greenGoalParameters and LineCropsView
+// func greenGoalParameters() -> BallCounter.Parameters {
+//     return parametersForGoal(at: 1) // 1 = green goal
+// }
 
 struct LineCropsView: View {
     @Environment(\.presentationMode) private var presentationMode
@@ -28,21 +34,37 @@ struct LineCropsView: View {
     @State private var redThreshold: CGFloat = 0.25
     @State private var blueThreshold: CGFloat = 0.37
     @State private var whiteThreshold: CGFloat = 0.26
-    @State private var regionSensitivity: CGFloat = 1.0
-    @State private var ballRadiusRatio: Double = AppSettingsManager.shared.ballRadiusRatio
-    @State private var exclusionRadiusMultiplier: Double = AppSettingsManager.shared.exclusionRadiusMultiplier
-    @State private var ballAreaPercentage: Double = AppSettingsManager.shared.ballAreaPercentage
-    @State private var whitePixelConversionDistance: Double = 5.0
-    @State private var coloredPixelThreshold: Double = 10.0
     
     // Analysis results for each crop
     @State private var analysisResults: [CropAnalysisResult] = []
     
+    // Make the per-goal detection configs stateful for runtime editing
+    @State private var goalDetectionConfigs: [GoalDetectionConfig] = defaultGoalDetectionConfigs
+
     // MARK: - Constants
     private let perpendicularPaddings: [CGFloat] = [13, 30, 16, 16] // red, green, blue, orange
     private let outwardPadding: CGFloat = 10.0 // Padding at the ends of the line (along the line direction)
     private let colors: [Color] = [.red, .green, .blue, .orange]
     private let labels: [String] = ["Red Line", "Green Line", "Blue Line", "Orange Line"]
+
+    // Helper to get BallCounter.Parameters for a given goal index
+    private func parametersForGoal(at index: Int) -> BallCounter.Parameters {
+        let config = goalDetectionConfigs[index]
+        return BallCounter.Parameters(
+            minWhiteLineSize: config.minWhiteLineSize,
+            ballRadiusRatio: config.ballRadiusRatio,
+            exclusionRadiusMultiplier: config.exclusionRadiusMultiplier,
+            whiteMergeThreshold: config.whiteMergeThreshold,
+            imageScale: config.imageScale,
+            ballAreaPercentage: config.ballAreaPercentage,
+            maxBallsInCluster: config.maxBallsInCluster,
+            clusterSplitThreshold: config.clusterSplitThreshold,
+            minClusterSeparation: config.minClusterSeparation,
+            whitePixelConversionDistance: config.whitePixelConversionDistance,
+            coloredPixelThreshold: config.coloredPixelThreshold,
+            pipeType: config.pipeType
+        )
+    }
 
     var body: some View {
         ZStack {
@@ -54,6 +76,7 @@ struct LineCropsView: View {
                     .foregroundColor(.white)
             } else {
                 VStack {
+                    detectionParameterEditor
                     ScrollView {
                         VStack(spacing: 24) {
                             // Display each crop with its analysis
@@ -63,13 +86,7 @@ struct LineCropsView: View {
                                     analysisResult: idx < analysisResults.count ? analysisResults[idx] : nil,
                                     redThreshold: $redThreshold,
                                     blueThreshold: $blueThreshold,
-                                    whiteThreshold: $whiteThreshold,
-                                    regionSensitivity: $regionSensitivity,
-                                    ballRadiusRatio: $ballRadiusRatio,
-                                    exclusionRadiusMultiplier: $exclusionRadiusMultiplier,
-                                    ballAreaPercentage: $ballAreaPercentage,
-                                    whitePixelConversionDistance: $whitePixelConversionDistance,
-                                    coloredPixelThreshold: $coloredPixelThreshold
+                                    whiteThreshold: $whiteThreshold
                                 )
                             }
                         }
@@ -157,34 +174,33 @@ struct LineCropsView: View {
         for (idx, crop) in processedCrops.enumerated() {
             Logger.debug("Analyzing crop \(idx) (\(crop.label))", category: .imageProcessing)
             
+            // Lower white threshold for red goal (idx 0), else use default
+            let customWhiteThreshold: CGFloat = (idx == 0) ? 0.18 : whiteThreshold
             // Quantize the image
             guard let quantizedImage = ColorQuantizer.quantize(
                 image: crop.image,
                 redThreshold: redThreshold,
                 blueThreshold: blueThreshold,
-                whiteThreshold: whiteThreshold
+                whiteThreshold: customWhiteThreshold
             ) else {
                 Logger.error("Failed to quantize crop \(idx)", category: .imageProcessing)
                 results.append(CropAnalysisResult(
                     quantizedImage: nil,
-                    detectionResult: nil,
+                    detectionResult: (zoneCounts: ZoneCounts(), annotatedImage: nil),
                     ballCounts: ZoneCounts()
                 ))
                 continue
             }
             
-            // Run detection
-            let detectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)?
-            if idx == 2 || idx == 3 {
-                detectionResult = runShortGoalDetection(on: quantizedImage)
-            } else {
-                detectionResult = await runDetection(on: quantizedImage)
-            }
+            let params = parametersForGoal(at: idx)
+            Logger.debug("Params for goal \(idx): \(params)", category: .imageProcessing)
+            let detector = BallCounter(parameters: params)
+            let detectionResult = detector.detectBalls(in: quantizedImage, pipeType: params.pipeType)
             
             results.append(CropAnalysisResult(
                 quantizedImage: quantizedImage,
                 detectionResult: detectionResult,
-                ballCounts: detectionResult?.zoneCounts ?? ZoneCounts()
+                ballCounts: detectionResult.zoneCounts
             ))
         }
         
@@ -194,41 +210,53 @@ struct LineCropsView: View {
             Logger.debug("Analysis complete", category: .imageProcessing)
         }
     }
-    
-    private func runDetection(on image: UIImage) async -> (zoneCounts: ZoneCounts, annotatedImage: UIImage?)? {
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                var params = BallCounter.Parameters(
-                    minWhiteLineSize: Int(50.0 * regionSensitivity),
-                    ballRadiusRatio: CGFloat(ballRadiusRatio),
-                    exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
-                    whiteMergeThreshold: 20,
-                    imageScale: 1.0,
-                    ballAreaPercentage: ballAreaPercentage
-                )
-                params.whitePixelConversionDistance = Int(whitePixelConversionDistance)
-                params.coloredPixelThreshold = Int(coloredPixelThreshold)
-                let detector = BallCounter(parameters: params)
-                let result = detector.detectBalls(in: image)
-                
-                continuation.resume(returning: result)
+
+    // UI for editing detection parameters (ballRadiusRatio) for each goal
+    private var detectionParameterEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Detection Parameters (Ball Radius Ratio)")
+                .font(.headline)
+                .foregroundColor(.white)
+            ForEach(0..<goalDetectionConfigs.count, id: \.self) { idx in
+                HStack {
+                    Text(labels[idx])
+                        .foregroundColor(colors[idx])
+                        .frame(width: 90, alignment: .leading)
+                    Slider(value: Binding(
+                        get: { goalDetectionConfigs[idx].ballRadiusRatio },
+                        set: { newValue in
+                            goalDetectionConfigs[idx] = GoalDetectionConfig(
+                                minWhiteLineSize: goalDetectionConfigs[idx].minWhiteLineSize,
+                                ballRadiusRatio: newValue,
+                                exclusionRadiusMultiplier: goalDetectionConfigs[idx].exclusionRadiusMultiplier,
+                                whiteMergeThreshold: goalDetectionConfigs[idx].whiteMergeThreshold,
+                                imageScale: goalDetectionConfigs[idx].imageScale,
+                                ballAreaPercentage: goalDetectionConfigs[idx].ballAreaPercentage,
+                                maxBallsInCluster: goalDetectionConfigs[idx].maxBallsInCluster,
+                                clusterSplitThreshold: goalDetectionConfigs[idx].clusterSplitThreshold,
+                                minClusterSeparation: goalDetectionConfigs[idx].minClusterSeparation,
+                                whitePixelConversionDistance: goalDetectionConfigs[idx].whitePixelConversionDistance,
+                                coloredPixelThreshold: goalDetectionConfigs[idx].coloredPixelThreshold,
+                                pipeType: goalDetectionConfigs[idx].pipeType
+                            )
+                        }
+                    ), in: 0.01...1.0, step: 0.01)
+                    Text(String(format: "%.2f", goalDetectionConfigs[idx].ballRadiusRatio))
+                        .foregroundColor(.white)
+                        .frame(width: 48, alignment: .trailing)
+                }
             }
+            Button("Re-Analyze All") {
+                Task { await runAnalysis() }
+            }
+            .buttonStyle(ControlButtonStyle(color: .purple))
         }
+        .padding()
+        .background(Color.black.opacity(0.7))
+        .cornerRadius(12)
+        .padding(.horizontal)
     }
-
-    // Helper for short-goal detection
-    private func runShortGoalDetection(on image: UIImage) -> (zoneCounts: ZoneCounts, annotatedImage: UIImage?)? {
-        return BallCounter(parameters: BallCounter.Parameters(
-            minWhiteLineSize: 99999, // disables white line detection
-            ballRadiusRatio: 0.045,  // larger ball radius for short goals
-            exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
-            whiteMergeThreshold: 20,
-            imageScale: 1.0,
-            ballAreaPercentage: ballAreaPercentage,
-            pipeType: .short
-        )).detectBalls(in: image, pipeType: .short)
-    }
-
+    
     // MARK: - Image Processing
 
     private func processImages() async {
@@ -486,7 +514,7 @@ struct LineCropsView: View {
 
 struct CropAnalysisResult {
     let quantizedImage: UIImage?
-    let detectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)?
+    let detectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)
     let ballCounts: ZoneCounts
 }
 
@@ -498,12 +526,6 @@ struct CropAnalysisSection: View {
     @Binding var redThreshold: CGFloat
     @Binding var blueThreshold: CGFloat
     @Binding var whiteThreshold: CGFloat
-    @Binding var regionSensitivity: CGFloat
-    @Binding var ballRadiusRatio: Double
-    @Binding var exclusionRadiusMultiplier: Double
-    @Binding var ballAreaPercentage: Double
-    @Binding var whitePixelConversionDistance: Double
-    @Binding var coloredPixelThreshold: Double
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -542,14 +564,13 @@ struct CropAnalysisSection: View {
                 }
                 
                 // Detection overlay
-                if let detectionResult = analysisResult.detectionResult,
-                   let annotatedImage = detectionResult.annotatedImage {
+                let detectionResult = analysisResult.detectionResult
+                if let annotatedImage = detectionResult.annotatedImage {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Detection")
                             .font(.subheadline)
                             .foregroundColor(.gray)
                             .padding(.leading, 8)
-                        
                         Image(uiImage: annotatedImage)
                             .resizable()
                             .interpolation(.high)

@@ -4,6 +4,9 @@ import AVFoundation
 import Combine
 import CoreImage
 import Foundation
+import CoreGraphics
+// Import the greenGoalParameters helper
+import VRC_RoboScore // or the correct module name if needed
 
 struct CameraView: View {
     @Environment(\.presentationMode) var presentationMode
@@ -456,18 +459,9 @@ struct CameraView: View {
         }
         
         DispatchQueue.global(qos: .userInitiated).async {
-            var params = BallCounter.Parameters(
-                minWhiteLineSize: Int(50.0 * regionSensitivity),
-                ballRadiusRatio: CGFloat(ballRadiusRatio),
-                exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
-                whiteMergeThreshold: 20,
-                imageScale: 1.0,
-                ballAreaPercentage: ballAreaPercentage
-            )
-            params.whitePixelConversionDistance = Int(whitePixelConversionDistance)
-            params.coloredPixelThreshold = Int(coloredPixelThreshold)
+            let params = parametersForGoal(at: 1) // 1 = green goal
             let detector = BallCounter(parameters: params)
-            let result = detector.detectBalls(in: image)
+            let result = detector.detectBalls(in: image, pipeType: params.pipeType)
             
             DispatchQueue.main.async {
                 withAnimation {
@@ -1066,18 +1060,9 @@ struct QuantizedImageSection: View {
         }
         
         DispatchQueue.global(qos: .userInitiated).async {
-            var params = BallCounter.Parameters(
-                minWhiteLineSize: Int(50.0 * regionSensitivity),
-                ballRadiusRatio: CGFloat(ballRadiusRatio),
-                exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
-                whiteMergeThreshold: 20,
-                imageScale: 1.0,
-                ballAreaPercentage: ballAreaPercentage
-            )
-            params.whitePixelConversionDistance = Int(whitePixelConversionDistance)
-            params.coloredPixelThreshold = Int(coloredPixelThreshold)
+            let params = parametersForGoal(at: 1) // 1 = green goal
             let detector = BallCounter(parameters: params)
-            let result = detector.detectBalls(in: image)
+            let result = detector.detectBalls(in: image, pipeType: params.pipeType)
             
             DispatchQueue.main.async {
                 withAnimation {
