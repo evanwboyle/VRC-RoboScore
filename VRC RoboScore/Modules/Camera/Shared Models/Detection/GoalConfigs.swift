@@ -2,6 +2,11 @@ import Foundation
 import CoreGraphics
 // import VRC_RoboScore if needed for PipeType
 
+enum PipeType {
+    case long
+    case short
+}
+
 struct GoalDetectionConfig {
     let minWhiteLineSize: Int
     let ballRadiusRatio: CGFloat

@@ -14,44 +14,18 @@ struct ThemeColors {
     static let background = Color("Background", bundle: nil)
 }
 
-// MARK: - Tab Selection
-enum Tab {
-    case calculator
-    case settings
-}
-
 // MARK: - Main Content View
 struct ContentView: View {
     @StateObject private var gameState = GameState()
-    @StateObject private var appSettings = AppSettingsManager.shared
-    @State private var selectedTab: Tab = .calculator
     
     var body: some View {
-        TabView(selection: $selectedTab) {
-            CalculatorView(gameState: gameState)
-                .tabItem {
-                    Label("Calculator", systemImage: "plus.forwardslash.minus")
-                }
-                .tag(Tab.calculator)
-            
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gear")
-                }
-                .tag(Tab.settings)
-        }
-        .accentColor(ThemeColors.red)
-        .animation(.none, value: selectedTab)
-        .preferredColorScheme(appSettings.getCurrentColorScheme())
-        .background(appSettings.getCurrentBackgroundColor())
-        .ignoresSafeArea(.all, edges: .all)
+        CalculatorView(gameState: gameState)
     }
 }
 
 // MARK: - Calculator View
 struct CalculatorView: View {
     @ObservedObject var gameState: GameState
-    @StateObject private var appSettings = AppSettingsManager.shared
     @State private var showingCamera = false
     @State private var showingMultiGoalCamera = false
     @State private var showingFieldCamera = false
@@ -79,7 +53,7 @@ struct CalculatorView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                appSettings.getCurrentBackgroundColor()
+                ThemeColors.background
                     .ignoresSafeArea()
                 
                 GeometryReader { geometry in
@@ -89,11 +63,6 @@ struct CalculatorView: View {
                                 LandscapeCalculatorContent(gameState: gameState)
                             } else {
                                 PortraitCalculatorContent(gameState: gameState)
-                            }
-                            
-                            // Debug information
-                            if appSettings.debugMode {
-                                DebugView(gameState: gameState)
                             }
                         }
                         .padding(.vertical)
@@ -336,44 +305,7 @@ struct PortraitCalculatorContent: View {
     }
 }
 
-// MARK: - Debug View
-struct DebugView: View {
-    @ObservedObject var gameState: GameState
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("DEBUG MODE")
-                .font(.headline)
-                .foregroundColor(.orange)
-            
-            Text("Red Score Breakdown:")
-                .font(.subheadline)
-                .foregroundColor(.red)
-            Text("  Top Goals: \(calculateTopGoalScore(for: .red, gameState: gameState))")
-            Text("  Bottom Goals: \(calculateBottomGoalScore(for: .red, gameState: gameState))")
-            let redParkedCount = gameState.parkedRobots[.red] ?? 0
-            let redParkedScore = redParkedCount == 1 ? 8 : (redParkedCount == 2 ? 30 : 0)
-            Text("  Parked Robots: \(redParkedScore)")
-            let redAutoScore = gameState.autoWinner == .red ? 10 : (gameState.autoWinner == .tie ? 5 : 0)
-            Text("  Auto Winner: \(redAutoScore)")
-            
-            Text("Blue Score Breakdown:")
-                .font(.subheadline)
-                .foregroundColor(.blue)
-            Text("  Top Goals: \(calculateTopGoalScore(for: .blue, gameState: gameState))")
-            Text("  Bottom Goals: \(calculateBottomGoalScore(for: .blue, gameState: gameState))")
-            let blueParkedCount = gameState.parkedRobots[.blue] ?? 0
-            let blueParkedScore = blueParkedCount == 1 ? 8 : (blueParkedCount == 2 ? 30 : 0)
-            Text("  Parked Robots: \(blueParkedScore)")
-            let blueAutoScore = gameState.autoWinner == .blue ? 10 : (gameState.autoWinner == .tie ? 5 : 0)
-            Text("  Auto Winner: \(blueAutoScore)")
-        }
-        .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
-        .padding(.horizontal)
-    }
-}
+
 
 // MARK: - Score Calculation Functions
 func calculateScore(for alliance: Alliance, gameState: GameState) -> Int {
@@ -621,70 +553,6 @@ struct AutonButton: View {
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .frame(width: 70, height: 70)
-    }
-}
-
-// MARK: - Settings View
-struct SettingsView: View {
-    @AppStorage("gameMode") private var gameMode = "Simple"
-    @AppStorage("matchType") private var matchType = "Non-Worlds"
-    @AppStorage("phaseType") private var phaseType = "Full Match"
-    @StateObject private var appSettings = AppSettingsManager.shared
-    @State private var showingColorPicker = false
-    
-    var body: some View {
-        NavigationView {
-            Form {
-                Section(header: Text("Game Settings")) {
-                    Picker("Game Mode", selection: $gameMode) {
-                        Text("Simple").tag("Simple")
-                        Text("Advanced").tag("Advanced")
-                    }
-                    
-                    Picker("Match Type", selection: $matchType) {
-                        Text("Worlds").tag("Worlds")
-                        Text("Non-Worlds").tag("Non-Worlds")
-                    }
-                    
-                    Picker("Phase Type", selection: $phaseType) {
-                        Text("Autonomous").tag("Autonomous")
-                        Text("Full Match").tag("Full Match")
-                    }
-                }
-                
-                Section(header: Text("App Settings")) {
-                    Toggle("Debug Mode", isOn: $appSettings.debugMode)
-                    
-                    Picker("Visual Mode", selection: $appSettings.visualMode) {
-                        ForEach(VisualMode.allCases, id: \.self) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    
-                    if appSettings.visualMode == .custom {
-                        HStack {
-                            Text("Custom Background")
-                            Spacer()
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(appSettings.customBackgroundColor)
-                                .frame(width: 30, height: 30)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color.primary, lineWidth: 1)
-                                )
-                                .onTapGesture {
-                                    showingColorPicker = true
-                                }
-                        }
-                    }
-                }
-            }
-            .background(appSettings.getCurrentBackgroundColor())
-            .navigationTitle("Settings")
-            .sheet(isPresented: $showingColorPicker) {
-                ColorPickerView(selectedColor: $appSettings.customBackgroundColor)
-            }
-        }
     }
 }
 

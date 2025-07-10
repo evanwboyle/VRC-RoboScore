@@ -76,7 +76,6 @@ struct LineCropsView: View {
                     .foregroundColor(.white)
             } else {
                 VStack {
-                    detectionParameterEditor
                     ScrollView {
                         VStack(spacing: 24) {
                             // Display each crop with its analysis
@@ -211,51 +210,7 @@ struct LineCropsView: View {
         }
     }
 
-    // UI for editing detection parameters (ballRadiusRatio) for each goal
-    private var detectionParameterEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Detection Parameters (Ball Radius Ratio)")
-                .font(.headline)
-                .foregroundColor(.white)
-            ForEach(0..<goalDetectionConfigs.count, id: \.self) { idx in
-                HStack {
-                    Text(labels[idx])
-                        .foregroundColor(colors[idx])
-                        .frame(width: 90, alignment: .leading)
-                    Slider(value: Binding(
-                        get: { goalDetectionConfigs[idx].ballRadiusRatio },
-                        set: { newValue in
-                            goalDetectionConfigs[idx] = GoalDetectionConfig(
-                                minWhiteLineSize: goalDetectionConfigs[idx].minWhiteLineSize,
-                                ballRadiusRatio: newValue,
-                                exclusionRadiusMultiplier: goalDetectionConfigs[idx].exclusionRadiusMultiplier,
-                                whiteMergeThreshold: goalDetectionConfigs[idx].whiteMergeThreshold,
-                                imageScale: goalDetectionConfigs[idx].imageScale,
-                                ballAreaPercentage: goalDetectionConfigs[idx].ballAreaPercentage,
-                                maxBallsInCluster: goalDetectionConfigs[idx].maxBallsInCluster,
-                                clusterSplitThreshold: goalDetectionConfigs[idx].clusterSplitThreshold,
-                                minClusterSeparation: goalDetectionConfigs[idx].minClusterSeparation,
-                                whitePixelConversionDistance: goalDetectionConfigs[idx].whitePixelConversionDistance,
-                                coloredPixelThreshold: goalDetectionConfigs[idx].coloredPixelThreshold,
-                                pipeType: goalDetectionConfigs[idx].pipeType
-                            )
-                        }
-                    ), in: 0.01...1.0, step: 0.01)
-                    Text(String(format: "%.2f", goalDetectionConfigs[idx].ballRadiusRatio))
-                        .foregroundColor(.white)
-                        .frame(width: 48, alignment: .trailing)
-                }
-            }
-            Button("Re-Analyze All") {
-                Task { await runAnalysis() }
-            }
-            .buttonStyle(ControlButtonStyle(color: .purple))
-        }
-        .padding()
-        .background(Color.black.opacity(0.7))
-        .cornerRadius(12)
-        .padding(.horizontal)
-    }
+
     
     // MARK: - Image Processing
 

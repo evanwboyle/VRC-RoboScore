@@ -806,9 +806,9 @@ struct BallCounterPreview: View {
     
     // Detection parameters
     @State private var showDetectionControls: Bool = false
-    @State private var ballRadiusRatio: Double = 0.024
-    @State private var exclusionRadiusMultiplier: Double = 1.2
-    @State private var ballAreaPercentage: Double = 30.0
+    @State private var ballRadiusRatio: Double = defaultGoalDetectionConfigs[1].ballRadiusRatio
+    @State private var exclusionRadiusMultiplier: Double = defaultGoalDetectionConfigs[1].exclusionRadiusMultiplier
+    @State private var ballAreaPercentage: Double = defaultGoalDetectionConfigs[1].ballAreaPercentage
     
     // Inspection mode state
     @State private var isInspectionMode = false
@@ -922,16 +922,14 @@ struct BallCounterPreview: View {
                     ParameterSlider(value: $ballRadiusRatio,
                                   range: 0.02...0.1,
                                   label: "Ball Radius Ratio")
-                        .onChange(of: ballRadiusRatio) { _, newValue in
-                            appSettings.ballRadiusRatio = newValue
-                            detectBalls()
-                        }
+                                .onChange(of: ballRadiusRatio) { _, newValue in
+            detectBalls()
+        }
                     
                     ParameterSlider(value: $exclusionRadiusMultiplier,
                                   range: 1.0...2.0,
                                   label: "Exclusion Radius")
                         .onChange(of: exclusionRadiusMultiplier) { _, newValue in
-                            appSettings.exclusionRadiusMultiplier = newValue
                             detectBalls()
                         }
                     
@@ -939,7 +937,6 @@ struct BallCounterPreview: View {
                                   range: 10...90,
                                   label: "Ball Area Percentage")
                         .onChange(of: ballAreaPercentage) { _, newValue in
-                            appSettings.ballAreaPercentage = newValue
                             detectBalls()
                         }
                 }
@@ -1038,10 +1035,10 @@ struct BallCounterPreview: View {
             detectBalls()
         }
         .onAppear {
-            // Initialize values from AppSettings
-            ballRadiusRatio = appSettings.ballRadiusRatio
-            exclusionRadiusMultiplier = appSettings.exclusionRadiusMultiplier
-            ballAreaPercentage = appSettings.ballAreaPercentage
+            // Initialize values from green pipe goal detection config
+            ballRadiusRatio = defaultGoalDetectionConfigs[1].ballRadiusRatio
+            exclusionRadiusMultiplier = defaultGoalDetectionConfigs[1].exclusionRadiusMultiplier
+            ballAreaPercentage = defaultGoalDetectionConfigs[1].ballAreaPercentage
             
             // Load initial image if available
             if let localImage = UIImage(contentsOfFile: Self.localImagePath) {

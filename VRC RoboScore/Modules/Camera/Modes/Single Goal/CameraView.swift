@@ -34,9 +34,9 @@ struct CameraView: View {
     
     // Detection parameter states
     @State private var showDetectionControls: Bool = false
-    @State private var ballRadiusRatio: Double = AppSettingsManager.shared.ballRadiusRatio
-    @State private var exclusionRadiusMultiplier: Double = AppSettingsManager.shared.exclusionRadiusMultiplier
-    @State private var ballAreaPercentage: Double = AppSettingsManager.shared.ballAreaPercentage
+    @State private var ballRadiusRatio: Double = defaultGoalDetectionConfigs[1].ballRadiusRatio
+    @State private var exclusionRadiusMultiplier: Double = defaultGoalDetectionConfigs[1].exclusionRadiusMultiplier
+    @State private var ballAreaPercentage: Double = defaultGoalDetectionConfigs[1].ballAreaPercentage
     
     @State private var ballCounts = ZoneCounts()
     @State private var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)? = nil
@@ -1230,7 +1230,6 @@ struct DetectionOverlaySection: View {
                                       range: 0.02...0.1,
                                       label: "Ball Radius Ratio")
                             .onChange(of: ballRadiusRatio) { _, newValue in
-                                appSettings.ballRadiusRatio = newValue
                                 onManualUpdate()
                             }
                         
@@ -1238,7 +1237,6 @@ struct DetectionOverlaySection: View {
                                       range: 1.0...2.0,
                                       label: "Exclusion Radius")
                             .onChange(of: exclusionRadiusMultiplier) { _, newValue in
-                                appSettings.exclusionRadiusMultiplier = newValue
                                 onManualUpdate()
                             }
                         
@@ -1246,7 +1244,6 @@ struct DetectionOverlaySection: View {
                                       range: 10...90,
                                       label: "Ball Area Percentage")
                             .onChange(of: ballAreaPercentage) { _, newValue in
-                                appSettings.ballAreaPercentage = newValue
                                 onManualUpdate()
                             }
                         
