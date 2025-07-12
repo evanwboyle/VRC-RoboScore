@@ -9,6 +9,7 @@ struct LineCrop {
     let image: UIImage
     let color: Color
     let label: String
+    let angleRadians: CGFloat
 }
 
 // Add these helper functions before the main struct or as extensions
@@ -61,7 +62,8 @@ struct LineCropsView: View {
             clusterSplitThreshold: config.clusterSplitThreshold,
             minClusterSeparation: config.minClusterSeparation,
             whitePixelConversionDistance: config.whitePixelConversionDistance,
-            coloredPixelThreshold: config.coloredPixelThreshold,
+            maxClustersToExpand: config.maxClustersToExpand,
+            minClusterSizeToExpand: config.minClusterSizeToExpand,
             pipeType: config.pipeType
         )
     }
@@ -133,7 +135,12 @@ struct LineCropsView: View {
                     .padding(.bottom, 20)
                 }
                 .sheet(isPresented: $showShareSheet) {
-                    ImageShareSheet(images: processedCrops.map { $0.image })
+                    ImageShareSheet(crops: processedCrops.enumerated().map { (idx, crop) in
+                        // Map color to string (Red, Green, Blue, Orange)
+                        let colorNames = ["Red", "Green", "Blue", "Orange"]
+                        let colorName = idx < colorNames.count ? colorNames[idx] : "Unknown"
+                        return ExportableCrop(image: crop.image, colorName: colorName, angleRadians: crop.angleRadians)
+                    })
                 }
             }
         }
@@ -284,12 +291,18 @@ struct LineCropsView: View {
                 Logger.debug("Final image corners: \(imageCorners)", category: .imageProcessing)
             }
             
+            // Calculate angle in radians
+            let dx = p1.x - p0.x
+            let dy = p1.y - p0.y
+            let angleRadians = atan2(dy, dx)
+            
             // Create cropped image
             if let croppedImage = cropImageTight(image, withCorners: imageCorners, showLogging: showDetailedLogging) {
                 let crop = LineCrop(
                     image: croppedImage,
                     color: colors[index],
-                    label: labels[index]
+                    label: labels[index],
+                    angleRadians: angleRadians
                 )
                 crops.append(crop)
                 Logger.debug("✓ Successfully created crop for \(labels[index]) - Size: \(croppedImage.size)", category: .imageProcessing)
@@ -484,8 +497,8 @@ struct CropAnalysisSection: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Crop label
-            Text(crop.label)
+            // Crop label with angle in radians
+            Text("\(crop.label) - \(String(format: "%.2f", crop.angleRadians)) rad")
                 .font(.headline)
                 .foregroundColor(.white)
                 .padding(.leading, 8)
@@ -645,11 +658,273 @@ struct ControlButtonStyle: ButtonStyle {
 }
 
 // MARK: - Image Share Sheet
+// New struct to hold image and metadata for export
+struct ExportableCrop {
+    let image: UIImage
+    let colorName: String
+    let angleRadians: CGFloat
+}
+
 struct ImageShareSheet: UIViewControllerRepresentable {
-    let images: [UIImage]
+    let crops: [ExportableCrop]
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        Logger.debug("Presenting ImageShareSheet with \(images.count) images", category: .export)
-        return UIActivityViewController(activityItems: images, applicationActivities: nil)
+        Logger.debug("Presenting ImageShareSheet with \(crops.count) images as PNGs", category: .export)
+        // Convert images to PNG data and write to temporary files with custom names
+        let tempURLs: [URL] = crops.compactMap { crop in
+            guard let pngData = crop.image.pngData() else { return nil }
+            let tempDir = FileManager.default.temporaryDirectory
+            let angleString = String(format: "%.2f", crop.angleRadians)
+            let filename = "\(crop.colorName)Goal_\(angleString).png"
+            let fileURL = tempDir.appendingPathComponent(filename)
+            do {
+                try pngData.write(to: fileURL)
+                return fileURL
+            } catch {
+                Logger.error("Failed to write PNG file: \(error)", category: .export)
+                return nil
+            }
+        }
+        return UIActivityViewController(activityItems: tempURLs, applicationActivities: nil)
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+} 
+
+// MARK: - Preview
+#Preview {
+    GoalImagesPreviewView()
+}
+
+// MARK: - Goal Images Preview View
+struct GoalImagesPreviewView: View {
+    // Load the goal images from assets - these are already cropped
+    let goalImageSetNames = ["GoalRed", "GoalGreen", "GoalBlue", "GoalOrange"]
+    let goalImages: [UIImage] = [
+        UIImage(named: "GoalRed") ?? UIImage(),
+        UIImage(named: "GoalGreen") ?? UIImage(),
+        UIImage(named: "GoalBlue") ?? UIImage(),
+        UIImage(named: "GoalOrange") ?? UIImage()
+    ]
+    // Principal angles for each goal image (in radians)
+    let goalAngles: [CGFloat] = [
+        /* Red,   Green,   Blue,   Orange */
+           0.01,    0.00,   -0.36,   0.30
+    ]
+    
+    let colors: [Color] = [.red, .green, .blue, .orange]
+    let labels: [String] = ["Red Goal", "Green Goal", "Blue Goal", "Orange Goal"]
+    
+    // Analysis state
+    @State private var analysisResults: [CropAnalysisResult] = []
+    @State private var isAnalyzing: Bool = false
+    @State private var showShareSheet: Bool = false
+    
+    // Detection parameters (shared across all crops)
+    @State private var redThreshold: CGFloat = 0.25
+    @State private var blueThreshold: CGFloat = 0.37
+    @State private var whiteThreshold: CGFloat = 0.26
+    
+    var body: some View {
+        ZStack {
+            Color.black.edgesIgnoringSafeArea(.all)
+            
+            VStack {
+                ScrollView {
+                    VStack(spacing: 24) {
+                        ForEach(0..<goalImages.count, id: \.self) { idx in
+                            VStack(alignment: .leading, spacing: 16) {
+                                // Goal label
+                                Text(labels[idx])
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 8)
+                                
+                                // Goal image
+                                Image(uiImage: goalImages[idx])
+                                    .resizable()
+                                    .interpolation(.high)
+                                    .aspectRatio(contentMode: .fit)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(colors[idx], lineWidth: 4)
+                                    )
+                                    .cornerRadius(8)
+                                
+                                // Analysis results if available
+                                if idx < analysisResults.count {
+                                    let result = analysisResults[idx]
+                                    
+                                    // Quantized image
+                                    if let quantizedImage = result.quantizedImage {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text("Quantized")
+                                                .font(.subheadline)
+                                                .foregroundColor(.gray)
+                                                .padding(.leading, 8)
+                                            
+                                            Image(uiImage: quantizedImage)
+                                                .resizable()
+                                                .interpolation(.high)
+                                                .aspectRatio(contentMode: .fit)
+                                                .background(Color.black)
+                                                .cornerRadius(8)
+                                        }
+                                        
+                                        // Detection overlay
+                                        let detectionResult = result.detectionResult
+                                        if let annotatedImage = detectionResult.annotatedImage {
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                Text("Detection")
+                                                    .font(.subheadline)
+                                                    .foregroundColor(.gray)
+                                                    .padding(.leading, 8)
+                                                Image(uiImage: annotatedImage)
+                                                    .resizable()
+                                                    .interpolation(.high)
+                                                    .aspectRatio(contentMode: .fit)
+                                                    .background(Color.black)
+                                                    .cornerRadius(8)
+                                            }
+                                        }
+                                        
+                                        // Compact ball counts
+                                        CompactBallCountsDisplay(ballCounts: result.ballCounts)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                }
+                .background(Color.black)
+                
+                // Control buttons
+                VStack(spacing: 12) {
+                    HStack(spacing: 24) {
+                        Button(action: saveAll) {
+                            Label("Save", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(ControlButtonStyle(color: .green))
+                        
+                        Button(action: { showShareSheet = true }) {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(ControlButtonStyle(color: .blue))
+                        
+                        Button(action: {
+                            Task {
+                                await runAnalysis()
+                            }
+                        }) {
+                            if isAnalyzing {
+                                HStack {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    Text("Analyzing...")
+                                }
+                            } else {
+                                Label("Analyze", systemImage: "magnifyingglass")
+                            }
+                        }
+                        .disabled(isAnalyzing)
+                        .buttonStyle(ControlButtonStyle(color: .purple))
+                    }
+                }
+                .padding(.bottom, 20)
+            }
+            .sheet(isPresented: $showShareSheet) {
+                ImageShareSheet(crops: goalImages.enumerated().map { (idx, image) in
+                    // Map color to string (Red, Green, Blue, Orange)
+                    let colorNames = ["Red", "Green", "Blue", "Orange"]
+                    let colorName = idx < colorNames.count ? colorNames[idx] : "Unknown"
+                    let angle = idx < goalAngles.count ? goalAngles[idx] : 0.0
+                    return ExportableCrop(image: image, colorName: colorName, angleRadians: angle)
+                })
+            }
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func saveAll() {
+        Logger.debug("Saving all goal images to photo library", category: .export)
+        PHPhotoLibrary.requestAuthorization { status in
+            guard status == .authorized || status == .limited else {
+                Logger.error("Photo library access not authorised", category: .export)
+                return
+            }
+            for image in goalImages {
+                UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+            }
+        }
+    }
+    
+    private func runAnalysis() async {
+        guard !goalImages.isEmpty else {
+            Logger.error("Cannot analyze - no goal images available", category: .imageProcessing)
+            return
+        }
+        
+        Logger.debug("Starting analysis of \(goalImages.count) goal images", category: .imageProcessing)
+        isAnalyzing = true
+        
+        var results: [CropAnalysisResult] = []
+        
+        for (idx, image) in goalImages.enumerated() {
+            Logger.debug("Analyzing goal image \(idx) (\(labels[idx]))", category: .imageProcessing)
+            
+            // Lower white threshold for red goal (idx 0), else use default
+            let customWhiteThreshold: CGFloat = (idx == 0) ? 0.18 : whiteThreshold
+            
+            // Quantize the image
+            guard let quantizedImage = ColorQuantizer.quantize(
+                image: image,
+                redThreshold: redThreshold,
+                blueThreshold: blueThreshold,
+                whiteThreshold: customWhiteThreshold
+            ) else {
+                Logger.error("Failed to quantize goal image \(idx)", category: .imageProcessing)
+                results.append(CropAnalysisResult(
+                    quantizedImage: nil,
+                    detectionResult: (zoneCounts: ZoneCounts(), annotatedImage: nil),
+                    ballCounts: ZoneCounts()
+                ))
+                continue
+            }
+            
+            // Use default goal detection configs for analysis
+            let config = defaultGoalDetectionConfigs[idx]
+            let angle = idx < goalAngles.count ? goalAngles[idx] : 0.0
+            let params = BallCounter.Parameters(
+                minWhiteLineSize: config.minWhiteLineSize,
+                ballRadiusRatio: config.ballRadiusRatio,
+                exclusionRadiusMultiplier: config.exclusionRadiusMultiplier,
+                whiteMergeThreshold: config.whiteMergeThreshold,
+                imageScale: config.imageScale,
+                ballAreaPercentage: config.ballAreaPercentage,
+                maxBallsInCluster: config.maxBallsInCluster,
+                clusterSplitThreshold: config.clusterSplitThreshold,
+                minClusterSeparation: config.minClusterSeparation,
+                whitePixelConversionDistance: config.whitePixelConversionDistance,
+                maxClustersToExpand: config.maxClustersToExpand,
+                minClusterSizeToExpand: config.minClusterSizeToExpand,
+                pipeType: config.pipeType
+            )
+            
+            Logger.debug("Params for goal \(idx): \(params)", category: .imageProcessing)
+            let detector = BallCounter(parameters: params)
+            let detectionResult = detector.detectBalls(in: quantizedImage, pipeType: params.pipeType, principalAngle: angle)
+            
+            results.append(CropAnalysisResult(
+                quantizedImage: quantizedImage,
+                detectionResult: detectionResult,
+                ballCounts: detectionResult.zoneCounts
+            ))
+        }
+        
+        await MainActor.run {
+            analysisResults = results
+            isAnalyzing = false
+            Logger.debug("Analysis complete", category: .imageProcessing)
+        }
+    }
 } 

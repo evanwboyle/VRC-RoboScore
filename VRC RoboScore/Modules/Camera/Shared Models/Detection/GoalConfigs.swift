@@ -18,7 +18,8 @@ struct GoalDetectionConfig {
     let clusterSplitThreshold: CGFloat
     let minClusterSeparation: CGFloat
     let whitePixelConversionDistance: Int
-    let coloredPixelThreshold: Int
+    let maxClustersToExpand: Int
+    let minClusterSizeToExpand: Int
     let pipeType: PipeType?
     init(
         minWhiteLineSize: Int,
@@ -31,7 +32,8 @@ struct GoalDetectionConfig {
         clusterSplitThreshold: CGFloat,
         minClusterSeparation: CGFloat,
         whitePixelConversionDistance: Int,
-        coloredPixelThreshold: Int,
+        maxClustersToExpand: Int,
+        minClusterSizeToExpand: Int,
         pipeType: PipeType?
     ) {
         self.minWhiteLineSize = minWhiteLineSize
@@ -44,7 +46,8 @@ struct GoalDetectionConfig {
         self.clusterSplitThreshold = clusterSplitThreshold
         self.minClusterSeparation = minClusterSeparation
         self.whitePixelConversionDistance = whitePixelConversionDistance
-        self.coloredPixelThreshold = coloredPixelThreshold
+        self.maxClustersToExpand = maxClustersToExpand
+        self.minClusterSizeToExpand = minClusterSizeToExpand
         self.pipeType = pipeType
     }
 }
@@ -56,13 +59,14 @@ let defaultGoalDetectionConfigs: [GoalDetectionConfig] = [
         ballRadiusRatio: 0.024,
         exclusionRadiusMultiplier: 1.2,
         whiteMergeThreshold: 20,
-        imageScale: 1.0,
+        imageScale: 1,
         ballAreaPercentage: 30.0,
-        maxBallsInCluster: 3,
+        maxBallsInCluster: 15,
         clusterSplitThreshold: 1.8,
         minClusterSeparation: 0.8,
-        whitePixelConversionDistance: 5,
-        coloredPixelThreshold: 10,
+        whitePixelConversionDistance: 50,
+        maxClustersToExpand: 15,
+        minClusterSizeToExpand: 10,
         pipeType: .long
     ),
     // Green
@@ -73,41 +77,44 @@ let defaultGoalDetectionConfigs: [GoalDetectionConfig] = [
         whiteMergeThreshold: 20,
         imageScale: 0.3,
         ballAreaPercentage: 30.0,
-        maxBallsInCluster: 3,
-        clusterSplitThreshold: 1.8,
+        maxBallsInCluster: 15,
+        clusterSplitThreshold: 1.9,
         minClusterSeparation: 0.8,
-        whitePixelConversionDistance: 5,
-        coloredPixelThreshold: 10,
+        whitePixelConversionDistance: 50,
+        maxClustersToExpand: 15,
+        minClusterSizeToExpand: 10,
         pipeType: .long
     ),
     // Blue
     GoalDetectionConfig(
-        minWhiteLineSize: 99999,
+        minWhiteLineSize: 0,
         ballRadiusRatio: 4,
         exclusionRadiusMultiplier: 1.2,
         whiteMergeThreshold: 10,
-        imageScale: 1.0,
+        imageScale: 1,
         ballAreaPercentage: 18.0,
         maxBallsInCluster: 7,
-        clusterSplitThreshold: 1.8,
+        clusterSplitThreshold: 1.9,
         minClusterSeparation: 0.8,
-        whitePixelConversionDistance: 8,
-        coloredPixelThreshold: 10,
+        whitePixelConversionDistance: 50,
+        maxClustersToExpand: 15,
+        minClusterSizeToExpand: 10,
         pipeType: .short
     ),
     // Orange
     GoalDetectionConfig(
-        minWhiteLineSize: 99999,
+        minWhiteLineSize: 0,
         ballRadiusRatio: 4,
         exclusionRadiusMultiplier: 1.2,
         whiteMergeThreshold: 40,
-        imageScale: 1.0,
+        imageScale: 1,
         ballAreaPercentage: 18.0,
         maxBallsInCluster: 7,
-        clusterSplitThreshold: 1.8,
+        clusterSplitThreshold: 1.9,
         minClusterSeparation: 0.8,
-        whitePixelConversionDistance: 8,
-        coloredPixelThreshold: 10,
+        whitePixelConversionDistance: 50,
+        maxClustersToExpand: 15,
+        minClusterSizeToExpand: 10,
         pipeType: .short
     )
 ]
@@ -126,7 +133,8 @@ func parametersForGoal(at index: Int, configs: [GoalDetectionConfig] = defaultGo
         clusterSplitThreshold: config.clusterSplitThreshold,
         minClusterSeparation: config.minClusterSeparation,
         whitePixelConversionDistance: config.whitePixelConversionDistance,
-        coloredPixelThreshold: config.coloredPixelThreshold,
+        maxClustersToExpand: config.maxClustersToExpand,
+        minClusterSizeToExpand: config.minClusterSizeToExpand,
         pipeType: config.pipeType
     )
 } 

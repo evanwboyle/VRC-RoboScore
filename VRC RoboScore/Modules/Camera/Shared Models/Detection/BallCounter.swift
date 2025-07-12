@@ -52,8 +52,9 @@ class BallCounter {
         var maxBallsInCluster: Int = 3     // Maximum number of balls to detect in a single cluster
         var clusterSplitThreshold: CGFloat = 1.8  // Width/height ratio threshold for splitting clusters
         var minClusterSeparation: CGFloat = 0.8   // Minimum separation between ball centers as a fraction of ball diameter
-        var whitePixelConversionDistance: Int = 5  // Distance to check for colored pixels around white pixels
-        var coloredPixelThreshold: Int = 10        // Number of colored pixels needed to convert white pixels
+        var whitePixelConversionDistance: Int = 5  // Distance to expand from cluster borders
+        var maxClustersToExpand: Int = 15          // Maximum number of largest clusters to expand from
+        var minClusterSizeToExpand: Int = 10       // Minimum cluster size to consider for expansion
         var pipeType: PipeType? = nil // Add this line
     }
     
@@ -67,6 +68,7 @@ class BallCounter {
     private var middleZoneEnd: Int = 0
     
     private var whitePixelConversions: [WhitePixelConversion] = []
+    private var efficientWhitePixelConversions: [WhitePixelConversion] = []
     
     init(parameters: Parameters = Parameters()) {
         self.params = parameters
@@ -87,15 +89,14 @@ class BallCounter {
         return counter.detectBalls(in: image).zoneCounts
     }
     
-    func detectBalls(in image: UIImage, pipeType: PipeType? = nil) -> (zoneCounts: ZoneCounts, annotatedImage: UIImage?) {
+    func detectBalls(in image: UIImage, pipeType: PipeType? = nil, principalAngle: CGFloat? = nil) -> (zoneCounts: ZoneCounts, annotatedImage: UIImage?) {
         let usePipeType = pipeType ?? params.pipeType
         let isShort = usePipeType == .short
-        let appSettings = AppSettingsManager.shared
         let startTime = CFAbsoluteTimeGetCurrent()
+        var lastSectionTime = startTime
+        let principalAngle = principalAngle ?? 0.0
         
-        if appSettings.debugMode {
-            print("\nDEBUG: Starting new ball detection")
-        }
+        print("\nDEBUG: Starting new ball detection")
         
         // Downscale image for faster processing if needed
         let workingImage: UIImage
@@ -138,45 +139,74 @@ class BallCounter {
         
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
         
-        // Process white pixels that should be considered colored
-        processWhitePixels(in: pixelData)
+        // --- TIMING: Efficient white pixel conversion ---
+        let whitePixelStart = CFAbsoluteTimeGetCurrent()
+        processWhitePixelsEfficiently(in: pixelData)
+        let whitePixelEnd = CFAbsoluteTimeGetCurrent()
+        print(String(format: "Efficient white pixel conversion - %.2fs", whitePixelEnd - whitePixelStart))
+        lastSectionTime = whitePixelEnd
+        
+        // Apply white pixel conversions to pixel data for ball detection
+        applyWhitePixelConversions(to: &pixelData)
+        
+        print("DEBUG: Efficient white pixel conversions: \(efficientWhitePixelConversions.count)")
+        let redConversions = efficientWhitePixelConversions.filter { $0.convertedColor == .red }.count
+        let blueConversions = efficientWhitePixelConversions.filter { $0.convertedColor == .blue }.count
+        print("DEBUG: Red conversions: \(redConversions), Blue conversions: \(blueConversions)")
+        
+        // DISABLED: Old white pixel conversion method
+        // processWhitePixels(in: pixelData)
         
         // For short pipes, skip white line detection
         var middleLines: [WhiteLine] = []
-        if !isShort {
-        // First, find white lines in middle half horizontally of image
-        let middleStartX = imageWidth / 4  // Only search middle half horizontally
-        let middleEndX = imageWidth * 3 / 4
-        var whiteLines: [WhiteLine] = []
-        
-        // Reset visited array for white line detection
-        visited = Array(repeating: false, count: imageWidth * imageHeight)
-        
-        for y in 0..<imageHeight {
-            for x in middleStartX..<middleEndX {
-                let idx = vIndex(x: x, y: y)
-                if visited[idx] { continue }
-                
-                let pixelIndex = (y * imageWidth + x) * bytesPerPixel
-                if isWhitePixel(data: pixelData, index: pixelIndex) {
-                    let cluster = findWhiteCluster(at: CGPoint(x: x, y: y), in: pixelData)
-                    if cluster.pixels.count > params.minWhiteLineSize {
-                        whiteLines.append(findWhiteLine(from: cluster))
+        let disableWhiteLineDetection = params.minWhiteLineSize <= 0
+        var whiteLineEnd: CFAbsoluteTime = lastSectionTime
+        if !isShort && !disableWhiteLineDetection {
+            // --- TIMING: White line detection ---
+            let whiteLineStart = CFAbsoluteTimeGetCurrent()
+            // First, find white lines in middle half horizontally of image
+            let middleStartX = imageWidth / 4  // Only search middle half horizontally
+            let middleEndX = imageWidth * 3 / 4
+            var whiteLines: [WhiteLine] = []
+            
+            // Reset visited array for white line detection
+            visited = Array(repeating: false, count: imageWidth * imageHeight)
+            
+            for y in 0..<imageHeight {
+                for x in middleStartX..<middleEndX {
+                    let idx = vIndex(x: x, y: y)
+                    if visited[idx] { continue }
+                    
+                    let pixelIndex = (y * imageWidth + x) * bytesPerPixel
+                    if isWhitePixel(data: pixelData, index: pixelIndex) {
+                        let cluster = findWhiteCluster(at: CGPoint(x: x, y: y), in: pixelData)
+                        if cluster.pixels.count > params.minWhiteLineSize {
+                            whiteLines.append(findWhiteLine(from: cluster))
+                        }
                     }
                 }
             }
+            
+            // Sort white lines by size and get the two largest
+            whiteLines.sort { $0.pixels.count > $1.pixels.count }
+            middleLines = Array(whiteLines.prefix(2))
+            whiteLineEnd = CFAbsoluteTimeGetCurrent()
+            print(String(format: "White line detection - %.2fs", whiteLineEnd - whiteLineStart))
+            lastSectionTime = whiteLineEnd
         }
         
-        // Sort white lines by size and get the two largest
-        whiteLines.sort { $0.pixels.count > $1.pixels.count }
-            middleLines = Array(whiteLines.prefix(2))
-        }
+        // --- TIMING: Cluster scan ---
+        let clusterScanStart = CFAbsoluteTimeGetCurrent()
+        
+        // Reset visited array for ball detection (white pixel conversion may have marked pixels as visited)
+        visited = Array(repeating: false, count: imageWidth * imageHeight)
         
         // Calculate ball dimensions
         let ballRadius: CGFloat = isShort ? CGFloat(imageWidth) * 0.045 : CGFloat(imageWidth) * params.ballRadiusRatio
         let minPixelsForBall = Int(Double.pi * pow(Double(ballRadius), 2) * (params.ballAreaPercentage / 100.0))
         
-        // Scan for colored clusters
+        // Scan for colored clusters (ONLY red and blue)
+        print("DEBUG: Starting main ball detection scan...")
         for x in 0..<imageWidth {
             for y in 0..<imageHeight {
                 let idx = vIndex(x: x, y: y)
@@ -185,29 +215,34 @@ class BallCounter {
                 let pixelIndex = (y * imageWidth + x) * bytesPerPixel
                 let color = getPixelColor(data: pixelData, index: pixelIndex)
                 
-                if color != nil {
-                    let cluster = findCluster(at: CGPoint(x: x, y: y), color: color!, in: pixelData)
+                // Only process red and blue clusters
+                if let color = color {
+                    //print("DEBUG: Processing \(color) cluster at (\(x), \(y))")
+                    let cluster = findCluster(at: CGPoint(x: x, y: y), color: color, in: pixelData)
                     
                     if cluster.pixels.count >= minPixelsForBall {
-                        let analysis = analyzeCluster(cluster, ballRadius: ballRadius)
+                        let analysis = analyzeCluster(cluster, ballRadius: ballRadius, principalAngle: principalAngle)
                         
                         for centerScaled in analysis.centers {
                             let center = CGPoint(x: centerScaled.x / params.imageScale,
                                                y: centerScaled.y / params.imageScale)
                             
                             // Check if ball is between white lines (use scaled coordinates)
-                            let isInMiddle = middleLines.count == 2 &&
-                                centerScaled.x > min(middleLines[0].xPosition, middleLines[1].xPosition) &&
-                                centerScaled.x < max(middleLines[0].xPosition, middleLines[1].xPosition) &&
-                                !doesBallIntersectLines(center: centerScaled, radius: ballRadius, lines: middleLines)
-                            
-                            if appSettings.debugMode {
-                                print("\nDEBUG: Ball Detection Details:")
-                                print("Ball position (scaled): \(centerScaled)")
-                                print("Color: \(analysis.color)")
-                                print("Middle line check result: \(isInMiddle)")
-                                print("Line positions: \(middleLines.map { $0.xPosition })")
+                            let isInMiddle: Bool
+                            if disableWhiteLineDetection {
+                                isInMiddle = false
+                            } else {
+                                isInMiddle = middleLines.count == 2 &&
+                                    centerScaled.x > min(middleLines[0].xPosition, middleLines[1].xPosition) &&
+                                    centerScaled.x < max(middleLines[0].xPosition, middleLines[1].xPosition) &&
+                                    !doesBallIntersectLines(center: centerScaled, radius: ballRadius, lines: middleLines)
                             }
+                            
+                            //print("\nDEBUG: Ball Detection Details:")
+                            //print("Ball position (scaled): \(centerScaled)")
+                            //print("Color: \(analysis.color)")
+                            //print("Middle line check result: \(isInMiddle)")
+                            //print("Line positions: \(middleLines.map { $0.xPosition })")
                             
                             let ball = Ball(center: center,
                                            color: analysis.color,
@@ -222,67 +257,68 @@ class BallCounter {
                 }
             }
         }
+        let clusterScanEnd = CFAbsoluteTimeGetCurrent()
+        print(String(format: "Cluster scan - %.2fs", clusterScanEnd - clusterScanStart))
+        lastSectionTime = clusterScanEnd
         
+        // --- TIMING: Counting balls ---
+        let countingStart = CFAbsoluteTimeGetCurrent()
         // Create zone counts
         var counts = ZoneCounts()
-        if appSettings.debugMode {
-            print("\nDEBUG: Counting detected balls:")
-        }
+        //print("\nDEBUG: Counting detected balls:")
         if isShort {
             // For short pipes, count all balls as 'middle', ignore inside/outside
             for ball in detectedBalls {
                 if ball.color == .red {
                     counts.middle.red += 1
-                    if appSettings.debugMode {
-                        print("DEBUG: Counted as middle red")
-                    }
+                    //print("DEBUG: Counted as middle red")
                 } else {
                     counts.middle.blue += 1
-                    if appSettings.debugMode {
-                        print("DEBUG: Counted as middle blue")
-                    }
+                    //print("DEBUG: Counted as middle blue")
+                }
+            }
+        } else if disableWhiteLineDetection {
+            // If white line detection is disabled, count all balls as outside
+            for ball in detectedBalls {
+                if ball.color == .red {
+                    counts.outside.red += 1
+                    //print("DEBUG: Counted as outside red (white line detection disabled)")
+                } else {
+                    counts.outside.blue += 1
+                    //print("DEBUG: Counted as outside blue (white line detection disabled)")
                 }
             }
         } else {
         for ball in detectedBalls {
-            if appSettings.debugMode {
-                print("DEBUG: Processing ball at \(ball.center) - Color: \(ball.color), IsMiddle: \(ball.isInMiddleZone)")
-            }
+            //print("DEBUG: Processing ball at \(ball.center) - Color: \(ball.color), IsMiddle: \(ball.isInMiddleZone)")
             if ball.isInMiddleZone {
                 if ball.color == .red {
                     counts.middle.red += 1
-                    if appSettings.debugMode {
-                        print("DEBUG: Counted as middle red")
-                    }
+                    //print("DEBUG: Counted as middle red")
                 } else {
                     counts.middle.blue += 1
-                    if appSettings.debugMode {
-                        print("DEBUG: Counted as middle blue")
-                    }
+                    //print("DEBUG: Counted as middle blue")
                 }
             } else {
                 if ball.color == .red {
                     counts.outside.red += 1
-                    if appSettings.debugMode {
-                        print("DEBUG: Counted as outside red")
-                    }
+                    //print("DEBUG: Counted as outside red")
                 } else {
                     counts.outside.blue += 1
-                    if appSettings.debugMode {
-                        print("DEBUG: Counted as outside blue")
+                    //print("DEBUG: Counted as outside blue")
                         }
                     }
                 }
             }
-        }
+        let countingEnd = CFAbsoluteTimeGetCurrent()
+        print(String(format: "Counting balls - %.2fs", countingEnd - countingStart))
+        lastSectionTime = countingEnd
         
         let endTime = CFAbsoluteTimeGetCurrent()
-        print("Ball detection completed in \(String(format: "%.3f", endTime - startTime)) seconds")
+        print(String(format: "Ball detection completed in %.3f seconds (total)", endTime - startTime))
         
-        if appSettings.debugMode {
-            print("DEBUG: Final counts - Middle: Red=\(counts.middle.red), Blue=\(counts.middle.blue)")
-            print("DEBUG: Final counts - Outside: Red=\(counts.outside.red), Blue=\(counts.outside.blue)")
-        }
+        print("DEBUG: Final counts - Middle: Red=\(counts.middle.red), Blue=\(counts.middle.blue)")
+        print("DEBUG: Final counts - Outside: Red=\(counts.outside.red), Blue=\(counts.outside.blue)")
         
         // Create annotated image
         let annotatedImage = createAnnotatedImage(originalImage: image, whiteLines: middleLines)
@@ -334,12 +370,8 @@ class BallCounter {
     }
     
     private func doesBallIntersectLines(center: CGPoint, radius: CGFloat, lines: [WhiteLine]) -> Bool {
-        let appSettings = AppSettingsManager.shared
-        
         guard lines.count == 2 else {
-            if appSettings.debugMode {
-                print("DEBUG: Not enough lines found (\(lines.count))")
-            }
+            print("DEBUG: Not enough lines found (\(lines.count))")
             return true
         }
         
@@ -354,24 +386,20 @@ class BallCounter {
             rightLineX = max(rightLineX, avgX)
         }
         
-        if appSettings.debugMode {
-            print("\nDEBUG: Line Positions:")
-            print("Left line: \(leftLineX)")
-            print("Right line: \(rightLineX)")
-            print("Ball center: \(center.x)")
-            print("Ball radius: \(radius)")
-            print("Ball left edge: \(center.x - radius)")
-            print("Ball right edge: \(center.x + radius)")
-        }
+        //print("\nDEBUG: Line Positions:")
+        //print("Left line: \(leftLineX)")
+        //print("Right line: \(rightLineX)")
+        //print("Ball center: \(center.x)")
+        //print("Ball radius: \(radius)")
+        //print("Ball left edge: \(center.x - radius)")
+        //print("Ball right edge: \(center.x + radius)")
         
         // Add a small buffer to avoid edge cases
         let buffer: CGFloat = 2.0
         
         // Check if ball's center is between the lines horizontally
         if center.x < leftLineX + buffer || center.x > rightLineX - buffer {
-            if appSettings.debugMode {
-                print("DEBUG: Ball center not between lines")
-            }
+            //print("DEBUG: Ball center not between lines")
             return true
         }
         
@@ -380,15 +408,11 @@ class BallCounter {
         let ballRight = center.x + radius
         
         if ballLeft < leftLineX + buffer || ballRight > rightLineX - buffer {
-            if appSettings.debugMode {
-                print("DEBUG: Ball touches lines")
-            }
+            //print("DEBUG: Ball touches lines")
             return true
         }
         
-        if appSettings.debugMode {
-            print("DEBUG: Ball is in middle zone!")
-        }
+        //print("DEBUG: Ball is in middle zone!")
         return false
     }
     
@@ -533,8 +557,8 @@ class BallCounter {
             context.strokePath()
         }
         
-        // Draw converted white pixels
-        for conversion in whitePixelConversions {
+        // Draw converted white pixels (using new efficient method)
+        for conversion in efficientWhitePixelConversions {
             let fillColor = conversion.convertedColor == .red ?
                 UIColor(red: 1.0, green: 0.0, blue: 0.0, alpha: 0.3) : // Semi-transparent red
                 UIColor(red: 0.0, green: 0.0, blue: 1.0, alpha: 0.3)   // Semi-transparent blue
@@ -688,57 +712,60 @@ class BallCounter {
         var color: BallColor
     }
     
-    private func analyzeCluster(_ cluster: Cluster, ballRadius: CGFloat) -> ClusterAnalysis {
+    private func analyzeCluster(_ cluster: Cluster, ballRadius: CGFloat, principalAngle: CGFloat = 0.0) -> ClusterAnalysis {
         let pixels = Array(cluster.pixels)
         var centers: [CGPoint] = []
-        
-        // Get cluster bounds
-        let minX = pixels.map { $0.x }.min() ?? 0
-        let maxX = pixels.map { $0.x }.max() ?? 0
-        let minY = pixels.map { $0.y }.min() ?? 0
-        let maxY = pixels.map { $0.y }.max() ?? 0
-        
+        // Rotate all pixels by -principalAngle around the cluster centroid
+        let centroid = calculateClusterCenter(cluster.pixels)
+        let rotatedPixels = pixels.map { rotate(point: $0, around: centroid, by: -principalAngle) }
+        // Get bounds in rotated space
+        let minX = rotatedPixels.map { $0.x }.min() ?? 0
+        let maxX = rotatedPixels.map { $0.x }.max() ?? 0
+        let minY = rotatedPixels.map { $0.y }.min() ?? 0
+        let maxY = rotatedPixels.map { $0.y }.max() ?? 0
         let width = maxX - minX
         let height = maxY - minY
         let aspectRatio = width / height
-        
         if aspectRatio >= params.clusterSplitThreshold {
-            // Cluster is wide enough to potentially contain multiple balls
             let potentialBallCount = min(Int(aspectRatio), params.maxBallsInCluster)
             let segmentWidth = width / CGFloat(potentialBallCount)
-            
-            // Create segments and find centers
             for i in 0..<potentialBallCount {
                 let segmentStart = minX + segmentWidth * CGFloat(i)
                 let segmentEnd = segmentStart + segmentWidth
-                
-                // Get pixels in this segment
-                let segmentPixels = pixels.filter { $0.x >= segmentStart && $0.x < segmentEnd }
+                // Get pixels in this segment (rotated space)
+                let segmentPixels = zip(pixels, rotatedPixels).filter { (_, rp) in rp.x >= segmentStart && rp.x < segmentEnd }.map { $0.0 }
                 if !segmentPixels.isEmpty {
                     let segmentCenter = calculateClusterCenter(Set(segmentPixels))
-                    
                     // Check if this center is far enough from other centers
                     let isFarEnough = centers.allSatisfy { existingCenter in
                         let distance = CGPoint(x: existingCenter.x - segmentCenter.x,
                                              y: existingCenter.y - segmentCenter.y).length
                         return distance >= (2 * ballRadius * params.minClusterSeparation)
                     }
-                    
                     if isFarEnough {
                         centers.append(segmentCenter)
                     }
                 }
             }
         }
-        
-        // If no split was possible or necessary, use the cluster center
         if centers.isEmpty {
             centers = [calculateClusterCenter(cluster.pixels)]
         }
-        
         return ClusterAnalysis(centers: centers, color: cluster.color)
     }
+    // Helper to rotate a point around a center by an angle (radians)
+    private func rotate(point: CGPoint, around center: CGPoint, by angle: CGFloat) -> CGPoint {
+        let translated = CGPoint(x: point.x - center.x, y: point.y - center.y)
+        let cosA = cos(angle)
+        let sinA = sin(angle)
+        let rotated = CGPoint(
+            x: translated.x * cosA - translated.y * sinA,
+            y: translated.x * sinA + translated.y * cosA
+        )
+        return CGPoint(x: rotated.x + center.x, y: rotated.y + center.y)
+    }
     
+    // OLD METHOD - No longer used in simplified algorithm
     private func findColoredPixelsAround(point: CGPoint, color: BallColor, distance: Int, in pixelData: [UInt8]) -> Int {
         var count = 0
         let x = Int(point.x)
@@ -753,39 +780,164 @@ class BallCounter {
                     let pixelIndex = (newY * imageWidth + newX) * 4
                     if getPixelColor(data: pixelData, index: pixelIndex) == color {
                         count += 1
+                        // Removed threshold check since this method is no longer used
+                    }
+                }
+            }
+        }
+        return count
+    }
+    
+    private func applyWhitePixelConversions(to pixelData: inout [UInt8]) {
+        for conversion in efficientWhitePixelConversions {
+            let x = Int(conversion.point.x)
+            let y = Int(conversion.point.y)
+            let pixelIndex = (y * imageWidth + x) * 4
+            
+            // Convert the white pixel to the appropriate color
+            if conversion.convertedColor == .red {
+                // Set to red color (using VRCColors.red components)
+                let redComponents = VRCColors.red.components
+                pixelData[pixelIndex] = UInt8(redComponents.red * 255.0)     // R
+                pixelData[pixelIndex + 1] = UInt8(redComponents.green * 255.0) // G
+                pixelData[pixelIndex + 2] = UInt8(redComponents.blue * 255.0)  // B
+                pixelData[pixelIndex + 3] = 255 // A
+            } else {
+                // Set to blue color (using VRCColors.blue components)
+                let blueComponents = VRCColors.blue.components
+                pixelData[pixelIndex] = UInt8(blueComponents.red * 255.0)     // R
+                pixelData[pixelIndex + 1] = UInt8(blueComponents.green * 255.0) // G
+                pixelData[pixelIndex + 2] = UInt8(blueComponents.blue * 255.0)  // B
+                pixelData[pixelIndex + 3] = 255 // A
+            }
+        }
+    }
+    
+
+    
+    // NEW EFFICIENT METHOD - Simplified border-based expansion
+    private func processWhitePixelsEfficiently(in pixelData: [UInt8]) {
+        efficientWhitePixelConversions.removeAll()
+        
+        // First, find all colored clusters (ONLY red and blue)
+        var redClusters: [Cluster] = []
+        var blueClusters: [Cluster] = []
+        
+        // Reset visited array for cluster detection
+        visited = Array(repeating: false, count: imageWidth * imageHeight)
+        
+        print("DEBUG: Starting cluster detection for white pixel conversion...")
+        
+        // Scan for colored clusters (ONLY red and blue)
+        for x in 0..<imageWidth {
+            for y in 0..<imageHeight {
+                let idx = vIndex(x: x, y: y)
+                if visited[idx] { continue }
+                
+                let pixelIndex = (y * imageWidth + x) * 4
+                let color = getPixelColor(data: pixelData, index: pixelIndex)
+                
+                // Only process red and blue clusters
+                if let color = color {
+                    //print("DEBUG: Found \(color) pixel at (\(x), \(y))")
+                    let cluster = findCluster(at: CGPoint(x: x, y: y), color: color, in: pixelData)
+                    
+                    // Only consider clusters that meet the minimum size threshold
+                    if cluster.pixels.count >= params.minClusterSizeToExpand {
+                        if color == .red {
+                            redClusters.append(cluster)
+                            //print("DEBUG: Added red cluster with \(cluster.pixels.count) pixels")
+                        } else if color == .blue {
+                            blueClusters.append(cluster)
+                            //print("DEBUG: Added blue cluster with \(cluster.pixels.count) pixels")
+                        }
+                    } else {
+                        //print("DEBUG: Skipped \(color) cluster with \(cluster.pixels.count) pixels (below threshold \(params.minClusterSizeToExpand))")
                     }
                 }
             }
         }
         
-        return count
+        // Sort clusters by size (largest first) and take only the top N
+        redClusters.sort { $0.pixels.count > $1.pixels.count }
+        blueClusters.sort { $0.pixels.count > $1.pixels.count }
+        
+        let topRedClusters = Array(redClusters.prefix(params.maxClustersToExpand))
+        let topBlueClusters = Array(blueClusters.prefix(params.maxClustersToExpand))
+        
+        print("DEBUG: Found \(redClusters.count) red clusters and \(blueClusters.count) blue clusters")
+        print("DEBUG: Using top \(topRedClusters.count) red clusters and \(topBlueClusters.count) blue clusters for expansion")
+        for (i, cluster) in topRedClusters.enumerated() {
+            //print("DEBUG: Top red cluster \(i): \(cluster.pixels.count) pixels")
+        }
+        for (i, cluster) in topBlueClusters.enumerated() {
+            //print("DEBUG: Top blue cluster \(i): \(cluster.pixels.count) pixels")
+        }
+        
+        // Now expand from each top cluster's border to find nearby white pixels
+        for cluster in topRedClusters {
+            convertWhitePixelsNearClusterSimplified(cluster: cluster, to: .red, maxDistance: params.whitePixelConversionDistance, in: pixelData)
+        }
+        
+        for cluster in topBlueClusters {
+            convertWhitePixelsNearClusterSimplified(cluster: cluster, to: .blue, maxDistance: params.whitePixelConversionDistance, in: pixelData)
+        }
     }
     
-    private func processWhitePixels(in pixelData: [UInt8]) {
-        whitePixelConversions.removeAll()
+
+    
+    // NEW SIMPLIFIED METHOD - No threshold checking, just expand from large clusters
+    private func convertWhitePixelsNearClusterSimplified(cluster: Cluster, to color: BallColor, maxDistance: Int, in pixelData: [UInt8]) {
+        var visited = Set<CGPoint>()
+        var queue: [(point: CGPoint, distance: Int)] = []
         
-        for y in 0..<imageHeight {
-            for x in 0..<imageWidth {
-                let pixelIndex = (y * imageWidth + x) * 4
-                if isWhitePixel(data: pixelData, index: pixelIndex) {
-                    let point = CGPoint(x: x, y: y)
+        // Find border pixels of the cluster (pixels that have at least one neighbor outside the cluster)
+        for point in cluster.pixels {
+            let x = Int(point.x)
+            let y = Int(point.y)
+            
+            // Check all 8 neighbors
+            for dx in -1...1 {
+                for dy in -1...1 {
+                    if dx == 0 && dy == 0 { continue }
                     
-                    // Check for nearby red pixels
-                    let redCount = findColoredPixelsAround(point: point, 
-                                                         color: .red, 
-                                                         distance: params.whitePixelConversionDistance, 
-                                                         in: pixelData)
+                    let neighborX = x + dx
+                    let neighborY = y + dy
+                    let neighbor = CGPoint(x: CGFloat(neighborX), y: CGFloat(neighborY))
                     
-                    // Check for nearby blue pixels
-                    let blueCount = findColoredPixelsAround(point: point, 
-                                                          color: .blue, 
-                                                          distance: params.whitePixelConversionDistance, 
-                                                          in: pixelData)
-                    
-                    if redCount >= params.coloredPixelThreshold && redCount > blueCount {
-                        whitePixelConversions.append(WhitePixelConversion(point: point, convertedColor: .red))
-                    } else if blueCount >= params.coloredPixelThreshold && blueCount > redCount {
-                        whitePixelConversions.append(WhitePixelConversion(point: point, convertedColor: .blue))
+                    // If neighbor is outside the cluster, this is a border pixel
+                    if !cluster.pixels.contains(neighbor) {
+                        queue.append((neighbor, 1))
+                    }
+                }
+            }
+        }
+        
+        // BFS outward from the border
+        while !queue.isEmpty {
+            let (point, distance) = queue.removeFirst()
+            
+            if distance > maxDistance { continue }
+            if visited.contains(point) { continue }
+            visited.insert(point)
+            
+            let x = Int(point.x)
+            let y = Int(point.y)
+            
+            if x < 0 || x >= imageWidth || y < 0 || y >= imageHeight { continue }
+            
+            let pixelIndex = (y * imageWidth + x) * 4
+            if isWhitePixel(data: pixelData, index: pixelIndex) {
+                // Simplified: Since this white pixel is near a large cluster, convert it automatically
+                efficientWhitePixelConversions.append(WhitePixelConversion(point: point, convertedColor: color))
+                
+                // Continue expanding from this white pixel
+                for dx in -1...1 {
+                    for dy in -1...1 {
+                        if dx == 0 && dy == 0 { continue }
+                        
+                        let neighbor = CGPoint(x: point.x + CGFloat(dx), y: point.y + CGFloat(dy))
+                        queue.append((neighbor, distance + 1))
                     }
                 }
             }
@@ -809,13 +961,16 @@ struct BallCounterPreview: View {
     @State private var ballRadiusRatio: Double = defaultGoalDetectionConfigs[1].ballRadiusRatio
     @State private var exclusionRadiusMultiplier: Double = defaultGoalDetectionConfigs[1].exclusionRadiusMultiplier
     @State private var ballAreaPercentage: Double = defaultGoalDetectionConfigs[1].ballAreaPercentage
+    @State private var whitePixelConversionDistance: Double = 5.0
+    @State private var maxClustersToExpand: Double = 15.0
+    @State private var minClusterSizeToExpand: Double = 10.0
     
     // Inspection mode state
     @State private var isInspectionMode = false
     @State private var lastInspectionResult: BallCounter.InspectionResult?
     @State private var inspectedPoint: CGPoint?
     
-    @StateObject private var appSettings = AppSettingsManager.shared
+
     
     private var detector: BallCounter {
         BallCounter(parameters: .init(
@@ -824,7 +979,10 @@ struct BallCounterPreview: View {
             exclusionRadiusMultiplier: CGFloat(exclusionRadiusMultiplier),
             whiteMergeThreshold: 20,
             imageScale: 0.33,
-            ballAreaPercentage: ballAreaPercentage
+            ballAreaPercentage: ballAreaPercentage,
+            whitePixelConversionDistance: Int(whitePixelConversionDistance),
+            maxClustersToExpand: Int(maxClustersToExpand),
+            minClusterSizeToExpand: Int(minClusterSizeToExpand)
         ))
     }
     
@@ -937,6 +1095,27 @@ struct BallCounterPreview: View {
                                   range: 10...90,
                                   label: "Ball Area Percentage")
                         .onChange(of: ballAreaPercentage) { _, newValue in
+                            detectBalls()
+                        }
+                    
+                    ParameterSlider(value: $whitePixelConversionDistance,
+                                  range: 1...20,
+                                  label: "White Pixel Conversion Distance")
+                        .onChange(of: whitePixelConversionDistance) { _, newValue in
+                            detectBalls()
+                        }
+                    
+                    ParameterSlider(value: $maxClustersToExpand,
+                                  range: 1...50,
+                                  label: "Max Clusters to Expand")
+                        .onChange(of: maxClustersToExpand) { _, newValue in
+                            detectBalls()
+                        }
+                    
+                    ParameterSlider(value: $minClusterSizeToExpand,
+                                  range: 1...50,
+                                  label: "Min Cluster Size to Expand")
+                        .onChange(of: minClusterSizeToExpand) { _, newValue in
                             detectBalls()
                         }
                 }
@@ -1074,10 +1253,8 @@ struct BallCounterPreview: View {
         // Inspect the point
         lastInspectionResult = detector.inspectPoint(CGPoint(x: imageX, y: imageY), in: image)
         
-        if AppSettingsManager.shared.debugMode {
-            print("DEBUG: Inspection at (\(Int(imageX)), \(Int(imageY)))")
-            print("DEBUG: \(lastInspectionResult?.reason ?? "No result")")
-        }
+        print("DEBUG: Inspection at (\(Int(imageX)), \(Int(imageY)))")
+        print("DEBUG: \(lastInspectionResult?.reason ?? "No result")")
     }
 }
 

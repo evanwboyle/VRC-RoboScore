@@ -44,7 +44,8 @@ struct CameraView: View {
     @State private var lastCapturedImage: UIImage? = nil
     @State private var isProcessing: Bool = false
     @State private var whitePixelConversionDistance: Double = 5.0
-    @State private var coloredPixelThreshold: Double = 10.0
+    @State private var maxClustersToExpand: Double = 15.0
+    @State private var minClusterSizeToExpand: Double = 10.0
     
     private var magnificationGesture: some Gesture {
         MagnificationGesture()
@@ -183,7 +184,8 @@ struct CameraView: View {
                                 ballCounts: $ballCounts,
                                 currentDetectionResult: $currentDetectionResult,
                                 whitePixelConversionDistance: $whitePixelConversionDistance,
-                                coloredPixelThreshold: $coloredPixelThreshold
+                                maxClustersToExpand: $maxClustersToExpand,
+                                minClusterSizeToExpand: $minClusterSizeToExpand
                             )
                         }
                     }
@@ -429,17 +431,36 @@ struct CameraView: View {
                 }
             }
             VStack(alignment: .leading) {
-                Text("Colored Pixel Threshold: \(Int(coloredPixelThreshold))")
+                Text("Max Clusters to Expand: \(Int(maxClustersToExpand))")
                 if #available(iOS 17.0, *) {
-                    Slider(value: $coloredPixelThreshold, in: 1...50, step: 1)
-                        .onChange(of: coloredPixelThreshold) { _, _ in
+                    Slider(value: $maxClustersToExpand, in: 1...50, step: 1)
+                        .onChange(of: maxClustersToExpand) { _, _ in
                             if let lastImage = lastCapturedImage {
                                 runDetection(on: lastImage, isManualUpdate: true)
                             }
                         }
                 } else {
-                    Slider(value: $coloredPixelThreshold, in: 1...50, step: 1)
-                        .onChange(of: coloredPixelThreshold) { _ in
+                    Slider(value: $maxClustersToExpand, in: 1...50, step: 1)
+                        .onChange(of: maxClustersToExpand) { _ in
+                            if let lastImage = lastCapturedImage {
+                                runDetection(on: lastImage, isManualUpdate: true)
+                            }
+                        }
+                }
+            }
+            
+            VStack(alignment: .leading) {
+                Text("Min Cluster Size to Expand: \(Int(minClusterSizeToExpand))")
+                if #available(iOS 17.0, *) {
+                    Slider(value: $minClusterSizeToExpand, in: 1...50, step: 1)
+                        .onChange(of: minClusterSizeToExpand) { _, _ in
+                            if let lastImage = lastCapturedImage {
+                                runDetection(on: lastImage, isManualUpdate: true)
+                            }
+                        }
+                } else {
+                    Slider(value: $minClusterSizeToExpand, in: 1...50, step: 1)
+                        .onChange(of: minClusterSizeToExpand) { _ in
                             if let lastImage = lastCapturedImage {
                                 runDetection(on: lastImage, isManualUpdate: true)
                             }
@@ -1042,7 +1063,8 @@ struct QuantizedImageSection: View {
     @Binding var ballCounts: ZoneCounts
     @Binding var currentDetectionResult: (zoneCounts: ZoneCounts, annotatedImage: UIImage?)?
     @Binding var whitePixelConversionDistance: Double
-    @Binding var coloredPixelThreshold: Double
+    @Binding var maxClustersToExpand: Double
+    @Binding var minClusterSizeToExpand: Double
     @StateObject private var appSettings = AppSettingsManager.shared
     @State private var isProcessing: Bool = false
     
