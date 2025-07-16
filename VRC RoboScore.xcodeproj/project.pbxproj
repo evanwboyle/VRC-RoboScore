@@ -410,6 +410,8 @@
 				INFOPLIST_FILE = "VRC-RoboScore-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = RoboScore;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Let user take pictures of game elements to score them automatically.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Let user store pictures taken of game elements to share their scores.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -421,7 +423,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.evanboyle.VRC-RoboScore";
+				PRODUCT_BUNDLE_IDENTIFIER = com.evanboyle.RoboLink;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -445,6 +447,8 @@
 				INFOPLIST_FILE = "VRC-RoboScore-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = RoboScore;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Let user take pictures of game elements to score them automatically.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Let user store pictures taken of game elements to share their scores.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -456,7 +460,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.evanboyle.VRC-RoboScore";
+				PRODUCT_BUNDLE_IDENTIFIER = com.evanboyle.RoboLink;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;

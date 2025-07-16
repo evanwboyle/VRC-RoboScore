@@ -4,6 +4,7 @@ import Photos
 import OSLog
 import CoreGraphics
 import Foundation
+import NotificationCenter
 
 struct LineCrop {
     let image: UIImage
@@ -20,7 +21,7 @@ struct LineCrop {
 // }
 
 struct LineCropsView: View {
-    @Environment(\.presentationMode) private var presentationMode
+    @Binding var isPresented: Bool
     let originalImage: UIImage
     let lineEndpoints: [[CGPoint]] // screen coordinates matching originalImage orientation (landscape)
     let screenSize: CGSize
@@ -30,6 +31,7 @@ struct LineCropsView: View {
     @State private var isProcessing: Bool = true
     @State private var showShareSheet: Bool = false
     @State private var isAnalyzing: Bool = false
+    @State private var hasAnalyzed: Bool = false
     
     // Detection parameters (shared across all crops)
     @State private var redThreshold: CGFloat = 0.25
@@ -98,7 +100,7 @@ struct LineCropsView: View {
                     // Control buttons
                     VStack(spacing: 12) {
                         HStack(spacing: 24) {
-                            Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                            Button(action: { isPresented = false }) {
                                 Label("Back", systemImage: "arrow.left")
                             }
                             .buttonStyle(ControlButtonStyle(color: .red))
@@ -130,6 +132,53 @@ struct LineCropsView: View {
                             }
                             .disabled(isAnalyzing)
                             .buttonStyle(ControlButtonStyle(color: .purple))
+
+                            // Add button to return to calculator
+                            if hasAnalyzed {
+                                Button(action: {
+                                    // Extract detected scores from analysisResults (order: Red, Green, Blue, Orange)
+                                    guard analysisResults.count == 4 else { return }
+                                    let red = analysisResults[0].ballCounts
+                                    let green = analysisResults[1].ballCounts
+                                    let blue = analysisResults[2].ballCounts
+                                    let orange = analysisResults[3].ballCounts
+
+                                    // For long goals, use total counts
+                                    let topLongRed = red.total.red
+                                    let topLongBlue = red.total.blue
+                                    let bottomLongRed = green.total.red
+                                    let bottomLongBlue = green.total.blue
+
+                                    // For control: difference in middle zone
+                                    let topLongControlDiff = red.middle.blue - red.middle.red
+                                    let bottomLongControlDiff = green.middle.blue - green.middle.red
+
+                                    // Short goals (orange = top short, blue = bottom short)
+                                    let orangeShortRed = orange.total.red
+                                    let orangeShortBlue = orange.total.blue
+                                    let blueShortRed = blue.total.red
+                                    let blueShortBlue = blue.total.blue
+
+                                    let detected = DetectedGoalScores(
+                                        topLongRed: topLongRed,
+                                        topLongBlue: topLongBlue,
+                                        topLongControlDiff: topLongControlDiff,
+                                        bottomLongRed: bottomLongRed,
+                                        bottomLongBlue: bottomLongBlue,
+                                        bottomLongControlDiff: bottomLongControlDiff,
+                                        orangeShortRed: orangeShortRed,
+                                        orangeShortBlue: orangeShortBlue,
+                                        blueShortRed: blueShortRed,
+                                        blueShortBlue: blueShortBlue
+                                    )
+                                    NotificationCenter.default.post(name: Notification.Name("DetectedGoalScores"), object: nil, userInfo: ["scores": detected])
+                                    NotificationCenter.default.post(name: Notification.Name("NavigateToCalculatorHome"), object: nil)
+                                    isPresented = false
+                                }) {
+                                    Label("Add", systemImage: "plus")
+                                }
+                                .buttonStyle(ControlButtonStyle(color: .orange))
+                            }
                         }
                     }
                     .padding(.bottom, 20)
@@ -173,46 +222,72 @@ struct LineCropsView: View {
         }
         
         Logger.debug("Starting analysis of \(processedCrops.count) crops", category: .imageProcessing)
-        isAnalyzing = true
-        
-        var results: [CropAnalysisResult] = []
-        
-        for (idx, crop) in processedCrops.enumerated() {
-            Logger.debug("Analyzing crop \(idx) (\(crop.label))", category: .imageProcessing)
-            
-            // Lower white threshold for red goal (idx 0), else use default
-            let customWhiteThreshold: CGFloat = (idx == 0) ? 0.18 : whiteThreshold
-            // Quantize the image
-            guard let quantizedImage = ColorQuantizer.quantize(
-                image: crop.image,
-                redThreshold: redThreshold,
-                blueThreshold: blueThreshold,
-                whiteThreshold: customWhiteThreshold
-            ) else {
-                Logger.error("Failed to quantize crop \(idx)", category: .imageProcessing)
+        await MainActor.run { isAnalyzing = true }
+
+        // Move the analysis work off the main thread
+        let crops = self.processedCrops
+        let redThreshold = self.redThreshold
+        let blueThreshold = self.blueThreshold
+        let whiteThreshold = self.whiteThreshold
+        let goalDetectionConfigs = self.goalDetectionConfigs
+
+        let results: [CropAnalysisResult] = await Task.detached(priority: .userInitiated) {
+            var results: [CropAnalysisResult] = []
+
+            for (idx, crop) in crops.enumerated() {
+                Logger.debug("Analyzing crop \(idx) (\(crop.label))", category: .imageProcessing)
+
+                // Lower white threshold for red goal (idx 0), else use default
+                let customWhiteThreshold: CGFloat = (idx == 0) ? 0.18 : whiteThreshold
+                // Quantize the image
+                guard let quantizedImage = ColorQuantizer.quantize(
+                    image: crop.image,
+                    redThreshold: redThreshold,
+                    blueThreshold: blueThreshold,
+                    whiteThreshold: customWhiteThreshold
+                ) else {
+                    Logger.error("Failed to quantize crop \(idx)", category: .imageProcessing)
+                    results.append(CropAnalysisResult(
+                        quantizedImage: nil,
+                        detectionResult: (zoneCounts: ZoneCounts(), annotatedImage: nil),
+                        ballCounts: ZoneCounts()
+                    ))
+                    continue
+                }
+
+                let config = goalDetectionConfigs[idx]
+                let params = BallCounter.Parameters(
+                    minWhiteLineSize: config.minWhiteLineSize,
+                    ballRadiusRatio: config.ballRadiusRatio,
+                    exclusionRadiusMultiplier: config.exclusionRadiusMultiplier,
+                    whiteMergeThreshold: config.whiteMergeThreshold,
+                    imageScale: config.imageScale,
+                    ballAreaPercentage: config.ballAreaPercentage,
+                    maxBallsInCluster: config.maxBallsInCluster,
+                    clusterSplitThreshold: config.clusterSplitThreshold,
+                    minClusterSeparation: config.minClusterSeparation,
+                    whitePixelConversionDistance: config.whitePixelConversionDistance,
+                    maxClustersToExpand: config.maxClustersToExpand,
+                    minClusterSizeToExpand: config.minClusterSizeToExpand,
+                    pipeType: config.pipeType
+                )
+                Logger.debug("Params for goal \(idx): \(params)", category: .imageProcessing)
+                let detector = BallCounter(parameters: params)
+                let detectionResult = detector.detectBalls(in: quantizedImage, pipeType: params.pipeType)
+
                 results.append(CropAnalysisResult(
-                    quantizedImage: nil,
-                    detectionResult: (zoneCounts: ZoneCounts(), annotatedImage: nil),
-                    ballCounts: ZoneCounts()
+                    quantizedImage: quantizedImage,
+                    detectionResult: detectionResult,
+                    ballCounts: detectionResult.zoneCounts
                 ))
-                continue
             }
-            
-            let params = parametersForGoal(at: idx)
-            Logger.debug("Params for goal \(idx): \(params)", category: .imageProcessing)
-            let detector = BallCounter(parameters: params)
-            let detectionResult = detector.detectBalls(in: quantizedImage, pipeType: params.pipeType)
-            
-            results.append(CropAnalysisResult(
-                quantizedImage: quantizedImage,
-                detectionResult: detectionResult,
-                ballCounts: detectionResult.zoneCounts
-            ))
-        }
-        
+            return results
+        }.value
+
         await MainActor.run {
             analysisResults = results
             isAnalyzing = false
+            hasAnalyzed = true
             Logger.debug("Analysis complete", category: .imageProcessing)
         }
     }
@@ -514,24 +589,8 @@ struct CropAnalysisSection: View {
                 )
                 .cornerRadius(8)
             
-            // Quantized image
-            if let analysisResult = analysisResult,
-               let quantizedImage = analysisResult.quantizedImage {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Quantized")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                        .padding(.leading, 8)
-                    
-                    Image(uiImage: quantizedImage)
-                        .resizable()
-                        .interpolation(.high)
-                        .aspectRatio(contentMode: .fit)
-                        .background(Color.black)
-                        .cornerRadius(8)
-                }
-                
-                // Detection overlay
+            // Detection overlay and ball counts (quantized image removed)
+            if let analysisResult = analysisResult {
                 let detectionResult = analysisResult.detectionResult
                 if let annotatedImage = detectionResult.annotatedImage {
                     VStack(alignment: .leading, spacing: 8) {
@@ -547,7 +606,6 @@ struct CropAnalysisSection: View {
                             .cornerRadius(8)
                     }
                 }
-                
                 // Compact ball counts
                 CompactBallCountsDisplay(ballCounts: analysisResult.ballCounts)
             }
@@ -752,43 +810,24 @@ struct GoalImagesPreviewView: View {
                                 // Analysis results if available
                                 if idx < analysisResults.count {
                                     let result = analysisResults[idx]
-                                    
-                                    // Quantized image
-                                    if let quantizedImage = result.quantizedImage {
+                                    // Detection overlay and ball counts (quantized image removed)
+                                    let detectionResult = result.detectionResult
+                                    if let annotatedImage = detectionResult.annotatedImage {
                                         VStack(alignment: .leading, spacing: 8) {
-                                            Text("Quantized")
+                                            Text("Detection")
                                                 .font(.subheadline)
                                                 .foregroundColor(.gray)
                                                 .padding(.leading, 8)
-                                            
-                                            Image(uiImage: quantizedImage)
+                                            Image(uiImage: annotatedImage)
                                                 .resizable()
                                                 .interpolation(.high)
                                                 .aspectRatio(contentMode: .fit)
                                                 .background(Color.black)
                                                 .cornerRadius(8)
                                         }
-                                        
-                                        // Detection overlay
-                                        let detectionResult = result.detectionResult
-                                        if let annotatedImage = detectionResult.annotatedImage {
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                Text("Detection")
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.gray)
-                                                    .padding(.leading, 8)
-                                                Image(uiImage: annotatedImage)
-                                                    .resizable()
-                                                    .interpolation(.high)
-                                                    .aspectRatio(contentMode: .fit)
-                                                    .background(Color.black)
-                                                    .cornerRadius(8)
-                                            }
-                                        }
-                                        
-                                        // Compact ball counts
-                                        CompactBallCountsDisplay(ballCounts: result.ballCounts)
                                     }
+                                    // Compact ball counts
+                                    CompactBallCountsDisplay(ballCounts: result.ballCounts)
                                 }
                             }
                         }
@@ -831,6 +870,11 @@ struct GoalImagesPreviewView: View {
                 }
                 .padding(.bottom, 20)
             }
+            .task {
+                if analysisResults.isEmpty && !isAnalyzing {
+                    await runAnalysis()
+                }
+            }
             .sheet(isPresented: $showShareSheet) {
                 ImageShareSheet(crops: goalImages.enumerated().map { (idx, image) in
                     // Map color to string (Red, Green, Blue, Orange)
@@ -865,66 +909,90 @@ struct GoalImagesPreviewView: View {
         }
         
         Logger.debug("Starting analysis of \(goalImages.count) goal images", category: .imageProcessing)
-        isAnalyzing = true
-        
-        var results: [CropAnalysisResult] = []
-        
-        for (idx, image) in goalImages.enumerated() {
-            Logger.debug("Analyzing goal image \(idx) (\(labels[idx]))", category: .imageProcessing)
-            
-            // Lower white threshold for red goal (idx 0), else use default
-            let customWhiteThreshold: CGFloat = (idx == 0) ? 0.18 : whiteThreshold
-            
-            // Quantize the image
-            guard let quantizedImage = ColorQuantizer.quantize(
-                image: image,
-                redThreshold: redThreshold,
-                blueThreshold: blueThreshold,
-                whiteThreshold: customWhiteThreshold
-            ) else {
-                Logger.error("Failed to quantize goal image \(idx)", category: .imageProcessing)
+        await MainActor.run { isAnalyzing = true }
+
+        // Move the analysis work off the main thread
+        let crops = self.goalImages
+        let redThreshold = self.redThreshold
+        let blueThreshold = self.blueThreshold
+        let whiteThreshold = self.whiteThreshold
+        let goalDetectionConfigs = defaultGoalDetectionConfigs
+
+        let results: [CropAnalysisResult] = await Task.detached(priority: .userInitiated) {
+            var results: [CropAnalysisResult] = []
+
+            for (idx, image) in crops.enumerated() {
+                Logger.debug("Analyzing goal image \(idx) (\(labels[idx]))", category: .imageProcessing)
+
+                // Lower white threshold for red goal (idx 0), else use default
+                let customWhiteThreshold: CGFloat = (idx == 0) ? 0.18 : whiteThreshold
+                
+                // Quantize the image
+                guard let quantizedImage = ColorQuantizer.quantize(
+                    image: image,
+                    redThreshold: redThreshold,
+                    blueThreshold: blueThreshold,
+                    whiteThreshold: customWhiteThreshold
+                ) else {
+                    Logger.error("Failed to quantize goal image \(idx)", category: .imageProcessing)
+                    results.append(CropAnalysisResult(
+                        quantizedImage: nil,
+                        detectionResult: (zoneCounts: ZoneCounts(), annotatedImage: nil),
+                        ballCounts: ZoneCounts()
+                    ))
+                    continue
+                }
+                
+                // Use default goal detection configs for analysis
+                let config = goalDetectionConfigs[idx]
+                let angle = idx < goalAngles.count ? goalAngles[idx] : 0.0
+                let params = BallCounter.Parameters(
+                    minWhiteLineSize: config.minWhiteLineSize,
+                    ballRadiusRatio: config.ballRadiusRatio,
+                    exclusionRadiusMultiplier: config.exclusionRadiusMultiplier,
+                    whiteMergeThreshold: config.whiteMergeThreshold,
+                    imageScale: config.imageScale,
+                    ballAreaPercentage: config.ballAreaPercentage,
+                    maxBallsInCluster: config.maxBallsInCluster,
+                    clusterSplitThreshold: config.clusterSplitThreshold,
+                    minClusterSeparation: config.minClusterSeparation,
+                    whitePixelConversionDistance: config.whitePixelConversionDistance,
+                    maxClustersToExpand: config.maxClustersToExpand,
+                    minClusterSizeToExpand: config.minClusterSizeToExpand,
+                    pipeType: config.pipeType
+                )
+                
+                Logger.debug("Params for goal \(idx): \(params)", category: .imageProcessing)
+                let detector = BallCounter(parameters: params)
+                let detectionResult = detector.detectBalls(in: quantizedImage, pipeType: params.pipeType, principalAngle: angle)
+                
                 results.append(CropAnalysisResult(
-                    quantizedImage: nil,
-                    detectionResult: (zoneCounts: ZoneCounts(), annotatedImage: nil),
-                    ballCounts: ZoneCounts()
+                    quantizedImage: quantizedImage,
+                    detectionResult: detectionResult,
+                    ballCounts: detectionResult.zoneCounts
                 ))
-                continue
             }
-            
-            // Use default goal detection configs for analysis
-            let config = defaultGoalDetectionConfigs[idx]
-            let angle = idx < goalAngles.count ? goalAngles[idx] : 0.0
-            let params = BallCounter.Parameters(
-                minWhiteLineSize: config.minWhiteLineSize,
-                ballRadiusRatio: config.ballRadiusRatio,
-                exclusionRadiusMultiplier: config.exclusionRadiusMultiplier,
-                whiteMergeThreshold: config.whiteMergeThreshold,
-                imageScale: config.imageScale,
-                ballAreaPercentage: config.ballAreaPercentage,
-                maxBallsInCluster: config.maxBallsInCluster,
-                clusterSplitThreshold: config.clusterSplitThreshold,
-                minClusterSeparation: config.minClusterSeparation,
-                whitePixelConversionDistance: config.whitePixelConversionDistance,
-                maxClustersToExpand: config.maxClustersToExpand,
-                minClusterSizeToExpand: config.minClusterSizeToExpand,
-                pipeType: config.pipeType
-            )
-            
-            Logger.debug("Params for goal \(idx): \(params)", category: .imageProcessing)
-            let detector = BallCounter(parameters: params)
-            let detectionResult = detector.detectBalls(in: quantizedImage, pipeType: params.pipeType, principalAngle: angle)
-            
-            results.append(CropAnalysisResult(
-                quantizedImage: quantizedImage,
-                detectionResult: detectionResult,
-                ballCounts: detectionResult.zoneCounts
-            ))
-        }
-        
+            return results
+        }.value
+
         await MainActor.run {
             analysisResults = results
             isAnalyzing = false
             Logger.debug("Analysis complete", category: .imageProcessing)
         }
     }
+} 
+
+// Struct for detected goal scores payload
+struct DetectedGoalScores: Codable {
+    let topLongRed: Int
+    let topLongBlue: Int
+    let topLongControlDiff: Int
+    let bottomLongRed: Int
+    let bottomLongBlue: Int
+    let bottomLongControlDiff: Int
+    let orangeShortRed: Int
+    let orangeShortBlue: Int
+    let blueShortRed: Int
+    let blueShortBlue: Int
 } 

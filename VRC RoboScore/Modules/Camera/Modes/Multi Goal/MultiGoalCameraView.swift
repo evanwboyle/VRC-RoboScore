@@ -6,7 +6,7 @@ struct MultiGoalCameraView: View {
     @Environment(\.presentationMode) var presentationMode
     @State private var capturedImage: UIImage?
     @State private var previousOrientation: UIInterfaceOrientationMask = .all // For restoring
-    @State private var showPreview: Bool = false // New state for preview toggle
+    @State private var showPreview: Bool = true // New state for preview toggle, now ON by default
     // Each line is two endpoints: [ [CGPoint, CGPoint], ... ] in screen coordinates
     @State private var lineEndpoints: [[CGPoint]] = []
     @State private var defaultLineEndpoints: [[CGPoint]] = []
@@ -61,7 +61,20 @@ struct MultiGoalCameraView: View {
                                 highlightedPosition: dragging?.line == i ? lineEndpoints[i][dragging!.point] : nil
                             )
                         }
-                        // 2. Overlay a transparent Rectangle with a DragGesture that handles all endpoint dragging.
+                        // Preview overlay (below buttons)
+                        if showPreview {
+                            VStack {
+                                PreviewCropRectangles(
+                                    image: image,
+                                    lineEndpoints: lineEndpoints,
+                                    colors: lineColors,
+                                    screenSize: screenGeometry.size,
+                                    outwardPadding: outwardPadding,
+                                    perpendicularPaddings: perpendicularPaddings
+                                )
+                            }
+                        }
+                        // Transparent Rectangle with DragGesture for moving endpoints
                         Rectangle()
                             .fill(Color.clear)
                             .contentShape(Rectangle())
@@ -105,6 +118,30 @@ struct MultiGoalCameraView: View {
                                         dragActive = false
                                     }
                             )
+                        // Buttons on right (topmost)
+                        VStack(spacing: 20) {
+                            Button("Retake") {
+                                capturedImage = nil
+                            }
+                            .buttonStyle(AppleButtonStyle(color: .red))
+                            Button("Reset") {
+                                lineEndpoints = defaultLineEndpoints
+                            }
+                            .buttonStyle(AppleButtonStyle(color: .orange))
+                            Button("Detailed") {
+                                showPreview.toggle()
+                            }
+                            .buttonStyle(AppleButtonStyle(color: showPreview ? .blue : .gray))
+                            Button("Done") {
+                                Logger.debug("Done pressed – navigating to LineCropsView", category: .navigation)
+                                showLineCropsView = true
+                            }
+                            .buttonStyle(AppleButtonStyle(color: .green))
+                            Spacer()
+                        }
+                        .padding(.top, 60)
+                        .padding(.trailing, 30)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     }
                     .frame(width: trueSize.width, height: trueSize.height)
                     .onAppear {
@@ -123,48 +160,11 @@ struct MultiGoalCameraView: View {
                             defaultLineEndpoints = defaults
                         }
                     }
-                    // Buttons on right
-                    VStack(spacing: 20) {
-                        Button("Retake") {
-                            capturedImage = nil
-                        }
-                        .buttonStyle(AppleButtonStyle(color: .red))
-                        Button("Reset") {
-                            lineEndpoints = defaultLineEndpoints
-                        }
-                        .buttonStyle(AppleButtonStyle(color: .orange))
-                        Button("Preview") {
-                            showPreview.toggle()
-                        }
-                        .buttonStyle(AppleButtonStyle(color: showPreview ? .blue : .gray))
-                        Button("Done") {
-                            Logger.debug("Done pressed – navigating to LineCropsView", category: .navigation)
-                            showLineCropsView = true
-                        }
-                        .buttonStyle(AppleButtonStyle(color: .green))
-                        Spacer()
-                    }
-                    .padding(.top, 60)
-                    .padding(.trailing, 30)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    // Preview overlay
-                    if showPreview {
-                        VStack {
-                            PreviewCropRectangles(
-                                image: image,
-                                lineEndpoints: lineEndpoints,
-                                colors: lineColors,
-                                screenSize: screenGeometry.size,
-                                outwardPadding: outwardPadding,
-                                perpendicularPaddings: perpendicularPaddings
-                            )
-                        }
-                    }
                 }
                 .edgesIgnoringSafeArea(.all)
                 .fullScreenCover(isPresented: $showLineCropsView) {
                     if let img = capturedImage, visibleAreaSize.width > 0, visibleAreaSize.height > 0 {
-                        LineCropsView(originalImage: img, lineEndpoints: lineEndpoints, screenSize: visibleAreaSize)
+                        LineCropsView(isPresented: $showLineCropsView, originalImage: img, lineEndpoints: lineEndpoints, screenSize: visibleAreaSize)
                     } else {
                         ProgressView("Loading…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -199,6 +199,15 @@ struct MultiGoalCameraView: View {
                                     highlightedPosition: nil
                                 )
                             }
+                            // Show bounding boxes overlay before taking a picture
+                            PreviewCropRectangles(
+                                image: nil,
+                                lineEndpoints: defaultLineEndpoints,
+                                colors: lineColors,
+                                screenSize: screenGeometry.size,
+                                outwardPadding: outwardPadding,
+                                perpendicularPaddings: perpendicularPaddings
+                            )
                         }
                         if !isLandscape {
                             LandscapePopup(orientation: currentOrientation)
@@ -263,7 +272,7 @@ struct MultiGoalCameraView: View {
             // green
             [CGPoint(x: 0.100 * w, y: 0.800 * h), CGPoint(x: 0.900 * w, y: 0.800 * h)],
             // blue
-            [CGPoint(x: 0.420 * w, y: 0.670 * h), CGPoint(x: 0.540 * w, y: 0.570 * h)],
+            [CGPoint(x: 0.420 * w, y: 0.670 * h), CGPoint(x: 0.545 * w, y: 0.590 * h)],
             // orange
             [CGPoint(x: 0.428 * w, y: 0.455 * h), CGPoint(x: 0.554 * w, y: 0.538 * h)]
         ]
@@ -286,13 +295,13 @@ struct EditableLine: View {
             }
             .stroke(
                 LinearGradient(
-                    gradient: Gradient(colors: [color.opacity(0.9), color.opacity(0.5)]),
+                    gradient: Gradient(colors: [color.opacity(0.5), color.opacity(0.25)]),
                     startPoint: .init(x: endpoints[0].x, y: endpoints[0].y),
                     endPoint: .init(x: endpoints[1].x, y: endpoints[1].y)
                 ),
                 style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round)
             )
-            .shadow(color: color.opacity(0.3), radius: 8, x: 0, y: 0)
+            .shadow(color: color.opacity(0.15), radius: 8, x: 0, y: 0)
             // Endpoints
             ForEach(0..<2, id: \.self) { idx in
                 ZStack {
@@ -302,16 +311,16 @@ struct EditableLine: View {
                         .shadow(color: color.opacity(idx == highlightedPoint ? 0.5 : 0.2), radius: idx == highlightedPoint ? 10 : 4)
                         .position(endpoints[idx])
                     if idx == highlightedPoint, let pos = highlightedPosition {
-                        VStack(spacing: 2) {
-                            Text("(\(Int(pos.x)), \(Int(pos.y)))")
-                                .font(.caption2)
-                                .foregroundColor(.white)
-                                .padding(4)
-                                .background(Color.black.opacity(0.7))
-                                .cornerRadius(5)
-                                .shadow(radius: 2)
-                        }
-                        .position(x: pos.x, y: pos.y - 30)
+                        // VStack(spacing: 2) {
+                        //     Text("(\(Int(pos.x)), \(Int(pos.y)))")
+                        //         .font(.caption2)
+                        //         .foregroundColor(.white)
+                        //         .padding(4)
+                        //         .background(Color.black.opacity(0.7))
+                        //         .cornerRadius(5)
+                        //         .shadow(radius: 2)
+                        // }
+                        // .position(x: pos.x, y: pos.y - 30)
                     }
                 }
             }
@@ -406,7 +415,7 @@ struct LandscapePopup: View {
 
 // 3. Update PreviewCropRectangles to accept outwardPadding and perpendicularPadding as parameters and use them in its drawing logic
 struct PreviewCropRectangles: View {
-    let image: UIImage
+    let image: UIImage? // Made optional
     let lineEndpoints: [[CGPoint]]
     let colors: [Color]
     let screenSize: CGSize
@@ -472,17 +481,6 @@ struct PreviewCropRectangles: View {
                         }
                         .stroke(colors[i], lineWidth: 2)
                     )
-                    // Draw corner coordinates
-                    ForEach(0..<4, id: \.self) { j in
-                        let corner = corners[j]
-                        Text("(\(Int(corner.x)), \(Int(corner.y)))")
-                            .font(.caption2)
-                            .foregroundColor(.white)
-                            .padding(2)
-                            .background(Color.black.opacity(0.7))
-                            .cornerRadius(3)
-                            .position(x: corner.x, y: corner.y - 12) // slightly above the corner
-                    }
                 }
             }
         }

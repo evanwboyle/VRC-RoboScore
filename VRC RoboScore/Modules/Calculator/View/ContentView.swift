@@ -33,6 +33,7 @@ struct CalculatorView: View {
     @State private var scoreToShare = ""
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
     @State private var importSuccessful = false
+    @State private var notificationObserver: NSObjectProtocol?
     
     // Alert state management
     enum AlertType: Identifiable {
@@ -158,6 +159,65 @@ struct CalculatorView: View {
                 scoreToShare = ""
             }) {
                 ShareSheet(shareText: $scoreToShare)
+            }
+        }
+        .onAppear {
+            notificationObserver = NotificationCenter.default.addObserver(forName: Notification.Name("NavigateToCalculatorHome"), object: nil, queue: .main) { _ in
+                showingCamera = false
+                showingMultiGoalCamera = false
+                showingFieldCamera = false
+                showingShareSheet = false
+            }
+            NotificationCenter.default.addObserver(forName: Notification.Name("DetectedGoalScores"), object: nil, queue: .main) { notification in
+                guard let userInfo = notification.userInfo,
+                      let detected = userInfo["scores"] as? DetectedGoalScores else { return }
+                // Top Long Goal (Red goal)
+                let topLong = gameState.topGoals[0]
+                let bottomLong = gameState.topGoals[1]
+                let topShort = gameState.bottomGoals[0]
+                let bottomShort = gameState.bottomGoals[1]
+
+                // Update blocks (max 15 for long, 7 for short)
+                let clamp15 = { (v: Int) in max(0, min(15, v)) }
+                let clamp7 = { (v: Int) in max(0, min(7, v)) }
+
+                topLong.redGoal.blocks = [.red: clamp15(detected.topLongRed), .blue: clamp15(detected.topLongBlue)]
+                topLong.blueGoal.blocks = [.red: clamp15(detected.topLongRed), .blue: clamp15(detected.topLongBlue)]
+                // Control for long goal
+                if detected.topLongControlDiff > 0 {
+                    topLong.redGoal.centerControl = .blue
+                    topLong.blueGoal.centerControl = .blue
+                } else if detected.topLongControlDiff < 0 {
+                    topLong.redGoal.centerControl = .red
+                    topLong.blueGoal.centerControl = .red
+                } else {
+                    topLong.redGoal.centerControl = nil
+                    topLong.blueGoal.centerControl = nil
+                }
+
+                bottomLong.redGoal.blocks = [.red: clamp15(detected.bottomLongRed), .blue: clamp15(detected.bottomLongBlue)]
+                bottomLong.blueGoal.blocks = [.red: clamp15(detected.bottomLongRed), .blue: clamp15(detected.bottomLongBlue)]
+                if detected.bottomLongControlDiff > 0 {
+                    bottomLong.redGoal.centerControl = .blue
+                    bottomLong.blueGoal.centerControl = .blue
+                } else if detected.bottomLongControlDiff < 0 {
+                    bottomLong.redGoal.centerControl = .red
+                    bottomLong.blueGoal.centerControl = .red
+                } else {
+                    bottomLong.redGoal.centerControl = nil
+                    bottomLong.blueGoal.centerControl = nil
+                }
+
+                // Short goals (orange -> top short, blue -> bottom short)
+                topShort.redGoal.blocks = [.red: clamp7(detected.orangeShortRed), .blue: clamp7(detected.orangeShortBlue)]
+                topShort.blueGoal.blocks = [.red: clamp7(detected.orangeShortRed), .blue: clamp7(detected.orangeShortBlue)]
+                bottomShort.redGoal.blocks = [.red: clamp7(detected.blueShortRed), .blue: clamp7(detected.blueShortBlue)]
+                bottomShort.blueGoal.blocks = [.red: clamp7(detected.blueShortRed), .blue: clamp7(detected.blueShortBlue)]
+            }
+        }
+        .onDisappear {
+            if let observer = notificationObserver {
+                NotificationCenter.default.removeObserver(observer)
             }
         }
     }
