@@ -5,8 +5,6 @@ import Combine
 import CoreImage
 import Foundation
 import CoreGraphics
-// Import the greenGoalParameters helper
-import VRC_RoboScore // or the correct module name if needed
 
 struct CameraView: View {
     @Environment(\.presentationMode) var presentationMode

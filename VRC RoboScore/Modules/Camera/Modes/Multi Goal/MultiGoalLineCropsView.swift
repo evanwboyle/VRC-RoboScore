@@ -6,7 +6,7 @@ import CoreGraphics
 import Foundation
 import NotificationCenter
 
-struct LineCrop {
+struct LineCrop: Equatable {
     let image: UIImage
     let color: Color
     let label: String
@@ -196,6 +196,11 @@ struct LineCropsView: View {
         .onAppear {
             Task {
                 await processImages()
+            }
+        }
+        .onChange(of: processedCrops) { newCrops in
+            if !newCrops.isEmpty && analysisResults.isEmpty && !isAnalyzing {
+                Task { await runAnalysis() }
             }
         }
     }

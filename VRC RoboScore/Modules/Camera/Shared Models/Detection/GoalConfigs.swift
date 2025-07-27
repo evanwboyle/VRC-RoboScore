@@ -64,7 +64,7 @@ let defaultGoalDetectionConfigs: [GoalDetectionConfig] = [
         maxBallsInCluster: 15,
         clusterSplitThreshold: 1.8,
         minClusterSeparation: 0.8,
-        whitePixelConversionDistance: 50,
+        whitePixelConversionDistance: 150,  // Increased from 50 to 150
         maxClustersToExpand: 15,
         minClusterSizeToExpand: 10,
         pipeType: .long
@@ -80,7 +80,7 @@ let defaultGoalDetectionConfigs: [GoalDetectionConfig] = [
         maxBallsInCluster: 15,
         clusterSplitThreshold: 1.9,
         minClusterSeparation: 0.8,
-        whitePixelConversionDistance: 50,
+        whitePixelConversionDistance: 2000,  // Increased from 50 to 150
         maxClustersToExpand: 15,
         minClusterSizeToExpand: 10,
         pipeType: .long
@@ -96,7 +96,7 @@ let defaultGoalDetectionConfigs: [GoalDetectionConfig] = [
         maxBallsInCluster: 7,
         clusterSplitThreshold: 1.9,
         minClusterSeparation: 0.8,
-        whitePixelConversionDistance: 50,
+        whitePixelConversionDistance: 150,  // Increased from 50 to 150
         maxClustersToExpand: 15,
         minClusterSizeToExpand: 10,
         pipeType: .short
@@ -112,7 +112,7 @@ let defaultGoalDetectionConfigs: [GoalDetectionConfig] = [
         maxBallsInCluster: 7,
         clusterSplitThreshold: 1.9,
         minClusterSeparation: 0.8,
-        whitePixelConversionDistance: 50,
+        whitePixelConversionDistance: 150,  // Increased from 50 to 150
         maxClustersToExpand: 15,
         minClusterSizeToExpand: 10,
         pipeType: .short
