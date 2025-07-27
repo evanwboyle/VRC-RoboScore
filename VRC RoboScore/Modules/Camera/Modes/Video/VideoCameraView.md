@@ -66,11 +66,20 @@
 - Converts detections to the format required by TrackSS.
 - Updates and stores tracked objects for overlay drawing.
 - Delegates ghost leg management to `GhostLegManager`.
+- Tracks how many frames each goal leg ID has persisted, using the `idPersistence` dictionary.
+- Each frame, computes the average movement (delta x, delta y) of tracked goal legs that have persisted for 3+ frames, and calls `moveGhostLegs(by:)` to shift all ghost legs accordingly.
+- **How to use:** No extra calls needed; persistence and movement are handled automatically in `update(with:)`.
+- **Warning:** If no tracked goal legs persist for 3+ frames, ghost legs will not move that frame.
 
 ### 8. GhostLegManager
-- Handles ghost leg persistence, proximity-based removal, and lifecycle management.
-- **How to use:** Use `addGhostLeg`, `removeGhostLegIfClose`, and `limitGhostLegs` to manage ghost leg overlays.
-- **Warning:** Ghost legs are only removed if a new goal leg appears close enough (see `goalLegThreshold`). Tune this value in `CameraConstants` if needed.
+- Handles ghost leg persistence, proximity-based removal, lifecycle management, and now ghost leg movement.
+- **How to use:**
+    - Use `addGhostLeg`, `removeGhostLegIfClose`, and `limitGhostLegs` to manage ghost leg overlays.
+    - Ghost legs are automatically shifted each frame by the average movement (delta x, delta y) of tracked goal legs that have persisted for 3 or more frames. This is done via `moveGhostLegs(by:)`, which is called from the tracker manager.
+- **Warning:**
+    - If no tracked goal legs have persisted for 3+ frames, ghost legs will not move that frame.
+    - If tracked goal legs move erratically, ghost leg movement may be less accurate. Consider tuning persistence threshold or movement logic if needed.
+    - Ghost legs are only removed if a new goal leg appears close enough (see `goalLegThreshold`). Tune this value in `CameraConstants` if needed.
 
 ---
 
@@ -84,9 +93,11 @@
 4. **Tracking Update:**
    - "Goal Leg" detections are passed to the SORT tracker.
    - Tracker returns persistent bounding boxes with IDs.
+   - Each goal leg's persistence (number of frames tracked) is updated.
+   - The average movement (delta x, delta y) of tracked goal legs that have persisted for 3+ frames is computed and applied to all ghost legs, so ghost legs shift with the field/camera.
 5. **Overlay Drawing:**
    - Tracked "Goal Leg" boxes are drawn in orange with their IDs.
-   - Ghost legs (last known positions of lost goal legs) are drawn in gray with their IDs, as placeholders until the real goal leg returns.
+   - Ghost legs (last known positions of lost goal legs) are drawn in gray with their IDs, as placeholders until the real goal leg returns, and now move with the field/camera.
    - Other detected objects (balls) are drawn in their respective colors.
 6. **Ghost Leg Lifecycle:**
    - When a goal leg disappears, its last position becomes a ghost leg if there are 3 or fewer alive goal legs.
@@ -122,10 +133,16 @@
 - Refactored overlay drawing and ghost leg logic to use helpers and constants.
 - Updated documentation to explain usage and warnings for new helpers and constants.
 
-### 2025-07-27 (Ghost Leg Persistence)
-- Added ghost leg persistence: lost goal legs are shown as gray placeholders until their real counterpart returns.
+
+### 2025-07-27 (Ghost Leg Movement & Persistence)
+- Added ghost leg movement: ghost legs now shift each frame by the average movement of tracked goal legs that have persisted for 3+ frames, improving prediction and realism.
+- Added persistence tracking for goal leg IDs, so only stable legs influence ghost movement.
 - Implemented proximity-based ghost removal: newborn goal legs replace nearby ghost legs, preventing flicker and overlap issues.
 - Capped total goal legs (tracked + ghosts) at 4 for UI clarity.
+### 2025-07-28 (Model Loading on App Launch)
+- Modified AppDelegate.swift to load the Roboflow model when the app starts, reducing initial loading time in the camera view.
+- Updated CameraViewController to check for the shared model instance, using it if available.
+- Streamlined loading logic to leverage the pre-loaded model instance.
 
 ### 2025-07-27
 - Integrated TrackSS (SORT) for persistent tracking of "Goal Leg" objects.
@@ -137,28 +154,45 @@
 ---
 
 ## Developer Notes & Warnings
-- **Pause/Unpause:** Pausing detection keeps the last overlay visible. Changing orientation while paused does not reset ghost legs.
-- **X Button:** Dismisses the camera view. Ensure the button is always accessible, even during loading.
-- **FPS Counter:** FPS is updated each frame and shown in the UI. Keep the overlay compact and styled consistently.
-- **Model Persistence:** The Roboflow model is loaded once per app session and reused for all camera sessions. If you need to reload the model, update `sharedRFModel` and `hasLoadedModel` accordingly.
-- **Loading Overlay:** The loading overlay only appears the first time the camera is opened. Subsequent opens use the already-loaded model and skip the overlay.
-- **State Changes:** State changes for model loading are dispatched asynchronously to avoid modifying state during view updates. Do not update SwiftUI state directly inside UIKit lifecycle methods.
-- **Always use `CameraConstants` for configuration:** This ensures overlays and logic remain consistent and easy to tune.
-- **Always clear overlays each frame:** Use `removeBoundingBoxes()` to prevent UI artifacts and memory leaks.
-- **Do not duplicate camera setup logic:** Use `CameraManager` for all session and preview management.
-- **Append all overlay layers to `boundingBoxLayers`:** This is required for proper cleanup.
-- **Tune ghost leg threshold carefully:** If set too high, ghosts may be removed incorrectly; if too low, ghosts may persist too long.
-- **Extend with care:** When adding new overlay types or trackers, use the provided helpers and constants for consistency.
+- **Ghost Leg Movement:** Ghost legs now shift by the average movement of tracked goal legs that have persisted for 3+ frames. If no legs meet this threshold, ghost legs remain stationary for that frame. If tracked legs move erratically, ghost leg movement may be less accurate.
 
 ## TODO
 - Add camera panning detection to make ghosts track better
-- Add SORT tracking to "Red Ball" and "Blue Ball" objects, with lifecycle to prevent flickering
+- Add SORT tracking to "Red Ball" and "Blue Ball" objects, with lifecycle to prevent flickering, this might be too computationally expensive though. Maybe try next bullet point instead
+- Use last 5-10 scores (chosen with slider by user) to update the score display so that it is averaged out and flickering shouldnt be an issue, also so that the score is a litle bit more consistent while still being fast
 - Add Control Zone detection through "Goal Leg" position tracking. Make python script that lets me find pixel coordinates of lines of pipes, including control zones. Then, make the coordinates scale to the live distances of the goal legs. Use the lines to find balls within the goals and then score them. Start out scoring with a simple overlay on each ball, making it have green text on the outside goals and orange text on the control zones. Remember to give ample context as to how the goals work in the real game (size limits, middle has no control)
 - Add live scoring with transparent overlay
 - Add goal control changes to overlay
 - Make model load while app opens up so it is instantly ready for use
 
 
+## Overlay Logic: Long and Short Goal Adjustments (2025-07-27)
+
+### drawRelativeGoalOverlays (UPDATED)
+- This function draws overlays for long and short goals using the live polygon and computed ratios/percentages.
+- **Recent changes:**
+    - The bottom long goal overlay is now raised by 90 points (vertical offset).
+    - The top long goal overlay is lowered by 10 points.
+    - Both short goal overlays are raised by 200 points.
+- **How to use:**
+    - The function is called automatically within `drawPolygonsOverlay` in `CameraViewController`.
+    - It uses the ordered polygon vertices and applies the above vertical adjustments for visual clarity and alignment with the real field.
+- **Warnings:**
+    - If the field geometry changes, update the vertical offsets in `drawRelativeGoalOverlays` accordingly.
+    - The overlay positions are sensitive to the live polygon ordering and field calibration.
+
+### Changelog
+#### 2025-07-27 (Overlay Adjustments)
+- Updated `drawRelativeGoalOverlays` to:
+    - Raise the bottom long goal by 90 points.
+    - Lower the top long goal by 10 points.
+    - Raise both short goals by 200 points.
+- These changes improve the alignment of overlays with the physical field and enhance visual feedback for users.
+
+### Developer Notes
+- The overlay logic for long and short goals is modular and can be tuned by adjusting the vertical offsets in the function.
+- All overlay drawing functions (`drawLine`, `drawPoint`, `drawPolygon`) are helpers that convert image coordinates to preview layer coordinates for accurate placement.
+- When updating overlay logic, always test on real device to ensure overlays match field geometry.
 
 
 

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		762979C82E35DF4600FF4A80 /* Roboflow in Frameworks */ = {isa = PBXBuildFile; productRef = 762979C72E35DF4600FF4A80 /* Roboflow */; };
 		762979CB2E35EB0400FF4A80 /* TrackSS in Frameworks */ = {isa = PBXBuildFile; productRef = 762979CA2E35EB0400FF4A80 /* TrackSS */; };
+		76297A1A2E36CCE300FF4A80 /* Perspective in Frameworks */ = {isa = PBXBuildFile; productRef = 76297A192E36CCE300FF4A80 /* Perspective */; };
 		7638A0432E0ED50300AA89C4 /* PythonKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7638A0422E0ED50300AA89C4 /* PythonKit */; };
 /* End PBXBuildFile section */
 
@@ -59,6 +60,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				762979CB2E35EB0400FF4A80 /* TrackSS in Frameworks */,
+				76297A1A2E36CCE300FF4A80 /* Perspective in Frameworks */,
 				762979C82E35DF4600FF4A80 /* Roboflow in Frameworks */,
 				7638A0432E0ED50300AA89C4 /* PythonKit in Frameworks */,
 			);
@@ -124,6 +126,7 @@
 				7638A0422E0ED50300AA89C4 /* PythonKit */,
 				762979C72E35DF4600FF4A80 /* Roboflow */,
 				762979CA2E35EB0400FF4A80 /* TrackSS */,
+				76297A192E36CCE300FF4A80 /* Perspective */,
 			);
 			productName = "VRC RoboScore";
 			productReference = 7622779A2DD630260039E6C3 /* VRC RoboScore.app */;
@@ -187,6 +190,7 @@
 				TargetAttributes = {
 					762277992DD630260039E6C3 = {
 						CreatedOnToolsVersion = 16.3;
+						LastSwiftMigration = 1640;
 					};
 					762277A62DD6302A0039E6C3 = {
 						CreatedOnToolsVersion = 16.3;
@@ -211,6 +215,7 @@
 				7638A0412E0ED50300AA89C4 /* XCRemoteSwiftPackageReference "PythonKit" */,
 				762979C62E35DF4600FF4A80 /* XCRemoteSwiftPackageReference "swift-sdk" */,
 				762979C92E35E99E00FF4A80 /* XCRemoteSwiftPackageReference "TrackSS" */,
+				76297A182E36CCE300FF4A80 /* XCRemoteSwiftPackageReference "Perspective" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7622779B2DD630260039E6C3 /* Products */;
@@ -410,10 +415,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NK8AYRW483;
 				ENABLE_PREVIEWS = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/VRC\\ RoboScore/Frameworks",
+				);
+				GCC_PRECOMPILE_PREFIX_HEADER = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "VRC-RoboScore-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = RoboScore;
@@ -437,6 +448,8 @@
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -447,10 +460,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NK8AYRW483;
 				ENABLE_PREVIEWS = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/VRC\\ RoboScore/Frameworks",
+				);
+				GCC_PRECOMPILE_PREFIX_HEADER = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "VRC-RoboScore-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = RoboScore;
@@ -474,6 +493,7 @@
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -605,6 +625,14 @@
 				minimumVersion = 1.0.0;
 			};
 		};
+		76297A182E36CCE300FF4A80 /* XCRemoteSwiftPackageReference "Perspective" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/LiYanan2004/Perspective";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 		7638A0412E0ED50300AA89C4 /* XCRemoteSwiftPackageReference "PythonKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/pvieito/PythonKit.git";
@@ -625,6 +653,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 762979C92E35E99E00FF4A80 /* XCRemoteSwiftPackageReference "TrackSS" */;
 			productName = TrackSS;
+		};
+		76297A192E36CCE300FF4A80 /* Perspective */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 76297A182E36CCE300FF4A80 /* XCRemoteSwiftPackageReference "Perspective" */;
+			productName = Perspective;
 		};
 		7638A0422E0ED50300AA89C4 /* PythonKit */ = {
 			isa = XCSwiftPackageProductDependency;

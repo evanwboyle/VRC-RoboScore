@@ -1,3 +1,63 @@
+// MARK: - Field Overlay Manager
+struct FieldOverlayManager {
+    private var cachedReferencePolygon: [CGPoint]?
+    private var hasPrintedReferencePolygon = false
+    
+    mutating func getReferencePolygon() -> [CGPoint]? {
+        if cachedReferencePolygon == nil {
+            if let refCenters = getReferencePolygonCenters() {
+                cachedReferencePolygon = orderVerticesClockwise(refCenters)
+                if !hasPrintedReferencePolygon {
+                    print("Reference Polygon Centers:")
+                    for (i, pt) in cachedReferencePolygon!.enumerated() {
+                        print("  [\(i)]: (x: \(pt.x), y: \(pt.y))")
+                    }
+                    hasPrintedReferencePolygon = true
+                }
+            }
+        }
+        return cachedReferencePolygon
+    }
+    
+    func getLivePolygon(from tracker: GoalLegTrackerManager) -> [CGPoint]? {
+        var centers: [CGPoint] = []
+        let allLegs = tracker.trackedGoalLegs + tracker.ghostLegs
+        if allLegs.count == 4 {
+            for leg in allLegs {
+                if leg.count >= 4 {
+                    let cx = (leg[0] + leg[2]) / 2.0
+                    let cy = (leg[1] + leg[3]) / 2.0
+                    centers.append(CGPoint(x: cx, y: cy))
+                }
+            }
+            return orderVerticesClockwise(centers)
+        }
+        return nil
+    }
+    
+    private func getReferencePolygonCenters() -> [CGPoint]? {
+        guard let annotations = FieldAnnotationLoader.loadAnnotations(from: Bundle.main.path(forResource: "VexFieldAnnotations", ofType: "json") ?? "") else { return nil }
+        let legs = annotations.goalLegs
+        if legs.count == 4 {
+            return legs.map { $0.center }
+        }
+        return nil
+    }
+    
+    private func orderVerticesClockwise(_ vertices: [CGPoint]) -> [CGPoint] {
+        guard vertices.count == 4 else { return vertices }
+        let centroid = CGPoint(
+            x: vertices.map { $0.x }.reduce(0, +) / 4.0,
+            y: vertices.map { $0.y }.reduce(0, +) / 4.0
+        )
+        return vertices.sorted { a, b in
+            let angleA = atan2(a.y - centroid.y, a.x - centroid.x)
+            let angleB = atan2(b.y - centroid.y, b.x - centroid.x)
+            return angleA < angleB
+        }
+    }
+}
+
 // MARK: - Model Load Flag
 /// Tracks if the Roboflow model has loaded in this app session (prevents loading overlay on subsequent opens)
 fileprivate var hasLoadedModel: Bool = false
@@ -145,11 +205,11 @@ import TrackSS
 
 class GhostLegManager {
     private(set) var ghostLegs: [[Double]] = []
+    private let threshold: Double = CameraConstants.goalLegThreshold // pixels, adjust as needed
 
     func clear() {
         ghostLegs.removeAll()
     }
-    private let threshold: Double = CameraConstants.goalLegThreshold // pixels, adjust as needed
 
     func addGhostLeg(for lostID: Double, from trackedGoalLegs: [[Double]]) {
         if let lastLeg = trackedGoalLegs.first(where: { $0.count == 5 && $0[4] == lostID }) {
@@ -183,6 +243,17 @@ class GhostLegManager {
             ghostLegs = Array(ghostLegs.dropFirst(excess))
         }
     }
+
+    // Move all ghost legs by the average delta of tracked goal legs that persist for 3+ frames
+    func moveGhostLegs(by delta: (dx: Double, dy: Double)) {
+        for i in 0..<ghostLegs.count {
+            guard ghostLegs[i].count >= 4 else { continue }
+            ghostLegs[i][0] += delta.dx
+            ghostLegs[i][1] += delta.dy
+            ghostLegs[i][2] += delta.dx
+            ghostLegs[i][3] += delta.dy
+        }
+    }
 }
 
 class GoalLegTrackerManager {
@@ -190,6 +261,10 @@ class GoalLegTrackerManager {
     private(set) var trackedGoalLegs: [[Double]] = []
     private var previousIDs: Set<Double> = []
     private let ghostLegManager = GhostLegManager()
+
+    // Track how many frames each goal leg ID has persisted
+    private var idPersistence: [Double: Int] = [:]
+    private var previousTracked: [[Double]] = []
 
     var ghostLegs: [[Double]] { ghostLegManager.ghostLegs }
 
@@ -215,8 +290,41 @@ class GoalLegTrackerManager {
             }
         }
         ghostLegManager.limitGhostLegs(trackedCount: newTracked.count, maxLegs: CameraConstants.maxGoalLegs)
+
+        // --- Ghost Leg Movement Logic ---
+        // Only use goal legs that persist for 3+ frames
+        var deltas: [(dx: Double, dy: Double)] = []
+        for new in newTracked {
+            guard new.count == 5 else { continue }
+            let id = new[4]
+            // Find previous position for this id
+            if let prev = previousTracked.first(where: { $0.count == 5 && $0[4] == id }) {
+                // Update persistence count
+                idPersistence[id, default: 1] += 1
+                if idPersistence[id]! >= 3 {
+                    // Compute delta
+                    let dx = ((new[0] + new[2]) / 2) - ((prev[0] + prev[2]) / 2)
+                    let dy = ((new[1] + new[3]) / 2) - ((prev[1] + prev[3]) / 2)
+                    deltas.append((dx: dx, dy: dy))
+                }
+            } else {
+                idPersistence[id] = 1
+            }
+        }
+        // Remove IDs that are no longer tracked
+        for id in idPersistence.keys where !currentIDs.contains(id) {
+            idPersistence.removeValue(forKey: id)
+        }
+        // Average delta
+        if !deltas.isEmpty {
+            let avgDx = deltas.map { $0.dx }.reduce(0, +) / Double(deltas.count)
+            let avgDy = deltas.map { $0.dy }.reduce(0, +) / Double(deltas.count)
+            ghostLegManager.moveGhostLegs(by: (dx: avgDx, dy: avgDy))
+        }
+
         trackedGoalLegs = newTracked
         previousIDs = currentIDs
+        previousTracked = newTracked
     }
 
     func clearGhostLegs() {
@@ -372,6 +480,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         cameraManager.addVideoOutput(delegate: self)
         cameraManager.startSession()
         loadRoboflowModel()
+        FieldAnnotationLoader.testLoadAnnotations()
     }
 
     // ...removed setupCamera, now handled by CameraManager...
@@ -421,7 +530,13 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         let dt = now - lastFrameTimestamp
         lastFrameTimestamp = now
         if let fpsBinding = fpsBinding {
-            let fpsValue = dt > 0 ? 1.0 / dt : 0.0
+            // Clamp dt to avoid division by zero and allow low FPS display
+            let fpsValue: Double
+            if dt > 0.0 {
+                fpsValue = 1.0 / dt
+            } else {
+                fpsValue = 0.0
+            }
             DispatchQueue.main.async {
                 fpsBinding.wrappedValue = fpsValue
             }
@@ -444,6 +559,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                     // Draw overlays from last frame
                     self.drawPausedOverlays(predictions: predictions, imageSize: imageSize)
                 }
+                self.drawPolygonsOverlay()
                 self.isProcessingFrame = false
             }
             return
@@ -468,6 +584,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                     }
                     // Draw other bounding boxes (balls, etc)
                     self?.drawBoundingBoxes(predictions: predictions, imageSize: image.size, skipGoalLegs: true)
+                    self?.drawPolygonsOverlay()
                     self?.lastOverlays = (predictions, image.size)
                 } else {
                     print("Predictions: \(String(describing: predictions))")
@@ -485,6 +602,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
             self.drawGhostLegs(imageSize: imageSize)
         }
         self.drawBoundingBoxes(predictions: predictions, imageSize: imageSize, skipGoalLegs: true)
+        self.drawPolygonsOverlay()
     }
 
     // Draw tracked Goal Legs using SORT output
@@ -661,6 +779,200 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         default:
             return .portrait
         }
+    }
+
+    private var fieldOverlayManager = FieldOverlayManager()
+    
+    private func drawPolygonsOverlay() {
+        guard let previewLayer = cameraManager.previewLayer else { return }
+        let imageSize = getCurrentImageSize()
+        // Draw live polygon in light green
+        if let livePolygon = fieldOverlayManager.getLivePolygon(from: goalLegTracker) {
+            drawPolygon(vertices: livePolygon,
+                       color: UIColor.systemGreen.withAlphaComponent(0.7),
+                       lineWidth: 4.0,
+                       imageSize: imageSize,
+                       previewLayer: previewLayer)
+
+            // --- Draw overlays for long/short goals ---
+            drawRelativeGoalOverlays(on: livePolygon, imageSize: imageSize, previewLayer: previewLayer)
+        }
+        // Draw reference polygon in dark blue
+        if let refPolygon = fieldOverlayManager.getReferencePolygon() {
+            drawPolygon(vertices: refPolygon,
+                       color: UIColor.systemBlue.withAlphaComponent(0.85),
+                       lineWidth: 3.0,
+                       imageSize: CGSize(width: 5712, height: 4284),
+                       previewLayer: previewLayer)
+        }
+    }
+
+    /// Draws overlays for long and short goals using live polygon and computed ratios/percentages
+    private func drawRelativeGoalOverlays(on polygon: [CGPoint], imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) {
+        guard polygon.count == 4 else { return }
+        // Order: [topLeft, topRight, bottomRight, bottomLeft] (clockwise)
+        let ordered = orderVerticesClockwise(polygon)
+        // --- Long Goals ---
+        // Horizontal pairs: (0,1) and (2,3)
+        let longGoalPairs = [(0,1), (2,3)]
+        let longGoalRatios: [CGFloat] = [0.9051, 0.9558] // From script output
+        let longGoalControlZone: (start: CGFloat, end: CGFloat) = (0.35, 0.65)
+        let longGoalHeightIncrements: [CGFloat] = [90.0, 190.0] // top long goal: lower by 10, bottom long goal: raise by 90
+        for (i, pair) in longGoalPairs.enumerated() {
+            let p1 = ordered[pair.0]
+            let p2 = ordered[pair.1]
+            let centerDist = hypot(p2.x - p1.x, p2.y - p1.y)
+            let goalLen = centerDist * longGoalRatios[i]
+            // Find direction vector
+            let dx = (p2.x - p1.x) / centerDist
+            let dy = (p2.y - p1.y) / centerDist
+            // Compute endpoints for the long goal line
+            let mid = CGPoint(x: (p1.x + p2.x)/2, y: (p1.y + p2.y)/2)
+            let halfLen = goalLen / 2
+            var ep1 = CGPoint(x: mid.x - dx * halfLen, y: mid.y - dy * halfLen)
+            var ep2 = CGPoint(x: mid.x + dx * halfLen, y: mid.y + dy * halfLen)
+            // Move endpoints vertically by custom increment
+            ep1.y -= longGoalHeightIncrements[i]
+            ep2.y -= longGoalHeightIncrements[i]
+            // Draw long goal line (yellow)
+            drawLine(from: ep1, to: ep2, color: UIColor.systemYellow, lineWidth: 5.0, imageSize: imageSize, previewLayer: previewLayer)
+            // Draw control zone points (orange)
+            var cz1 = CGPoint(x: ep1.x + (ep2.x - ep1.x) * longGoalControlZone.start, y: ep1.y + (ep2.y - ep1.y) * longGoalControlZone.start)
+            var cz2 = CGPoint(x: ep1.x + (ep2.x - ep1.x) * longGoalControlZone.end, y: ep1.y + (ep2.y - ep1.y) * longGoalControlZone.end)
+            // Control zones already moved with ep1/ep2
+            drawPoint(at: cz1, color: UIColor.orange, radius: 14, imageSize: imageSize, previewLayer: previewLayer)
+            drawPoint(at: cz2, color: UIColor.orange, radius: 14, imageSize: imageSize, previewLayer: previewLayer)
+        }
+        // --- Short Goals ---
+        // Percentages from script output
+        let shortGoalPercents: [[(y: CGFloat, x: CGFloat)]] = [
+            [(48.10, 57.07), (34.76, 44.68)], // Short Goal 1
+            [(73.33, 41.99), (58.10, 55.18)]  // Short Goal 2
+        ]
+        // Polygon bounds
+        let minX = ordered.map { $0.x }.min() ?? 0
+        let maxX = ordered.map { $0.x }.max() ?? 0
+        let minY = ordered.map { $0.y }.min() ?? 0
+        let maxY = ordered.map { $0.y }.max() ?? 0
+        for (goalIdx, endpoints) in shortGoalPercents.enumerated() {
+            var pts: [CGPoint] = []
+            for ep in endpoints {
+                // Undo Y inversion for short goals
+                let x = minX + (maxX - minX) * (ep.x / 100)
+                var y = minY + (maxY - minY) * (ep.y / 100)
+                // Raise short goals by 200
+                y -= 150.0
+                pts.append(CGPoint(x: x, y: y))
+            }
+            if pts.count == 2 {
+                drawLine(from: pts[0], to: pts[1], color: UIColor.systemPink, lineWidth: 5.0, imageSize: imageSize, previewLayer: previewLayer)
+            }
+        }
+    }
+
+    /// Draws a line between two points on the overlay
+    private func drawLine(from: CGPoint, to: CGPoint, color: UIColor, lineWidth: CGFloat, imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) {
+        let p1 = convertPoint(from, imageSize: imageSize, previewLayer: previewLayer)
+        let p2 = convertPoint(to, imageSize: imageSize, previewLayer: previewLayer)
+        let path = UIBezierPath()
+        path.move(to: p1)
+        path.addLine(to: p2)
+        let shapeLayer = CAShapeLayer()
+        shapeLayer.path = path.cgPath
+        shapeLayer.strokeColor = color.cgColor
+        shapeLayer.lineWidth = lineWidth
+        overlayView.layer.addSublayer(shapeLayer)
+        boundingBoxLayers.append(shapeLayer)
+    }
+    
+    /// Helper method to draw a point for debugging transforms
+    private func drawPoint(at point: CGPoint, color: UIColor, radius: CGFloat, imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) {
+        let convertedPoint = convertPoint(point, imageSize: imageSize, previewLayer: previewLayer)
+        let pointLayer = CAShapeLayer()
+        let path = UIBezierPath(arcCenter: convertedPoint,
+                               radius: radius,
+                               startAngle: 0,
+                               endAngle: 2 * .pi,
+                               clockwise: true)
+        pointLayer.path = path.cgPath
+        pointLayer.fillColor = color.cgColor
+        overlayView.layer.addSublayer(pointLayer)
+        boundingBoxLayers.append(pointLayer)
+    }
+
+    /// Returns the centers of the live polygon (tracked + ghost goal legs)
+    private func getLivePolygonCenters() -> [CGPoint]? {
+        var centers: [CGPoint] = []
+        let allLegs = goalLegTracker.trackedGoalLegs + goalLegTracker.ghostLegs
+        if allLegs.count == 4 {
+            for leg in allLegs {
+                if leg.count >= 4 {
+                    let cx = (leg[0] + leg[2]) / 2.0
+                    let cy = (leg[1] + leg[3]) / 2.0
+                    centers.append(CGPoint(x: cx, y: cy))
+                }
+            }
+            return centers
+        }
+        return nil
+    }
+
+    /// Returns the centers of the reference polygon from annotation data
+    private func getReferencePolygonCenters() -> [CGPoint]? {
+        guard let annotations = FieldAnnotationLoader.loadAnnotations(from: Bundle.main.path(forResource: "VexFieldAnnotations", ofType: "json") ?? "") else { return nil }
+        let legs = annotations.goalLegs
+        if legs.count == 4 {
+            return legs.map { $0.center }
+        }
+        return nil
+    }
+
+    /// Draws a polygon on the overlay view given a list of CGPoint vertices
+    private func drawPolygon(vertices: [CGPoint], color: UIColor, lineWidth: CGFloat = 3.0, imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) {
+        guard vertices.count == 4 else { return }
+        let path = UIBezierPath()
+        path.move(to: convertPoint(vertices[0], imageSize: imageSize, previewLayer: previewLayer))
+        for i in 1..<vertices.count {
+            path.addLine(to: convertPoint(vertices[i], imageSize: imageSize, previewLayer: previewLayer))
+        }
+        path.close()
+        let shapeLayer = CAShapeLayer()
+        shapeLayer.path = path.cgPath
+        shapeLayer.strokeColor = color.cgColor
+        shapeLayer.fillColor = UIColor.clear.cgColor
+        shapeLayer.lineWidth = lineWidth
+        overlayView.layer.addSublayer(shapeLayer)
+        boundingBoxLayers.append(shapeLayer)
+    }
+    /// Orders 4 vertices clockwise around their centroid
+    private func orderVerticesClockwise(_ vertices: [CGPoint]) -> [CGPoint] {
+        guard vertices.count == 4 else { return vertices }
+        let centroid = CGPoint(
+            x: vertices.map { $0.x }.reduce(0, +) / 4.0,
+            y: vertices.map { $0.y }.reduce(0, +) / 4.0
+        )
+        return vertices.sorted { a, b in
+            let angleA = atan2(a.y - centroid.y, a.x - centroid.x)
+            let angleB = atan2(b.y - centroid.y, b.x - centroid.x)
+            return angleA < angleB
+        }
+    }
+
+    /// Gets the current image size from the last frame (fallback to 5712x4284 if unavailable)
+    private func getCurrentImageSize() -> CGSize {
+        if let overlays = lastOverlays {
+            return overlays.1
+        }
+        return CGSize(width: 5712, height: 4284)
+    }
+
+    /// Converts a CGPoint from image coordinates to preview layer coordinates
+    private func convertPoint(_ point: CGPoint, imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) -> CGPoint {
+        let normX = point.x / imageSize.width
+        let normY = point.y / imageSize.height
+        let normalizedRect = CGRect(x: normX, y: normY, width: 0.001, height: 0.001)
+        let convertedRect = previewLayer.layerRectConverted(fromMetadataOutputRect: normalizedRect)
+        return CGPoint(x: convertedRect.origin.x, y: convertedRect.origin.y)
     }
 }
 
