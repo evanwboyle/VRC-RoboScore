@@ -146,7 +146,7 @@ struct CalculatorView: View {
                 }
             }
             .fullScreenCover(isPresented: $showingFieldCamera) {
-                FieldCameraView()
+                FieldCameraView(isPresented: $showingFieldCamera)
             }
             .fullScreenCover(isPresented: $showingCamera) {
                 CameraView()

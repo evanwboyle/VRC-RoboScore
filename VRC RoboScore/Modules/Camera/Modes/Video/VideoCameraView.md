@@ -1,3 +1,8 @@
+# Model Persistence (NEW)
+- `hasLoadedModel` (file scope): Tracks if the Roboflow model has loaded in this app session. Prevents loading overlay on subsequent opens.
+- `sharedRFModel` (file scope): Persists the loaded Roboflow model instance across camera opens. Ensures detection works after reopening the camera.
+- **How to use:** Always access the model via `sharedRFModel` in `CameraViewController`. The model is loaded once and reused for all camera sessions.
+- **Warning:** If you reload the model, update `sharedRFModel` so all camera sessions use the new instance.
 # VideoCameraView.swift Documentation
 
 ## Overview
@@ -6,47 +11,72 @@
 ---
 
 ## Main Components
+### 9. Pause/Unpause Button (NEW)
+- Rectangular button with bezels, located next to the X button.
+- Toggles between "Pause" and "Unpause" text. When paused, object detection is halted but the camera feed continues updating.
+- Overlay persists while paused, showing the last detected objects.
+- **How to use:** Use the `isPaused` state in `FieldCameraView` and pass it to `CameraViewControllerRepresentable`. The button toggles this state.
+- **Warning:** Pausing does not reset ghost legs when changing orientation while paused.
 
-### 1. FieldCameraView (SwiftUI)
+### 10. X Button (NEW)
+- Circular button with a mostly transparent background and opaque black "X" icon.
+- Located at the top left of the camera overlay, allows users to exit the camera view.
+- **How to use:** Use the `isPresented` binding in `FieldCameraView`. The button sets this to `false` to dismiss the camera.
+
+### 11. FPS Counter (NEW)
+- Compact, rectangular overlay at the top right, styled similarly to other buttons.
+- Displays the current frames per second with 1 decimal place accuracy.
+- **How to use:** The `fps` state in `FieldCameraView` is updated each frame and shown in the overlay.
+
+
+### 1. CameraConstants (NEW)
+- Centralizes all configuration values for overlays and tracking logic.
+- Groups constants by purpose: tracking logic, tracked goal leg overlays, ghost leg overlays, ball overlays.
+- **How to use:** Reference `CameraConstants` for any configurable value (colors, sizes, thresholds) in overlays or tracking logic. This makes future tuning and maintenance much easier.
+- **Warning:** Always update constants here rather than hardcoding values elsewhere.
+
+### 2. CameraManager (NEW)
+- Handles camera session setup, preview layer management, and video output configuration.
+- **How to use:** Instantiate and call `setupCamera(on:)`, `addVideoOutput(delegate:)`, and `startSession()` from your view controller.
+- **Warning:** Only one `AVCaptureSession` should be active at a time. Do not duplicate camera setup logic elsewhere.
+
+### 3. BoundingBoxDrawer (NEW)
+- Helper class for drawing bounding box overlays and labels on the camera preview.
+- **How to use:** Call `BoundingBoxDrawer.drawBox(...)` with the appropriate parameters for tracked legs, ghost legs, or balls. Returns the created `CAShapeLayer` for management.
+- **Warning:** Always append returned layers to your `boundingBoxLayers` array so overlays can be properly cleared.
+
+### 4. FieldCameraView (SwiftUI)
 - The main SwiftUI view embedding the camera functionality.
 - Uses `CameraViewControllerRepresentable` to bridge UIKit and SwiftUI.
 
-### 2. CameraViewControllerRepresentable
+### 5. CameraViewControllerRepresentable
 - A SwiftUI wrapper for the `CameraViewController` (UIKit).
 - Handles creation and updating of the camera controller.
 
-### 3. CameraViewController (UIKit)
-- Handles camera setup, frame capture, object detection, and overlay drawing.
-- Uses `AVCaptureSession` for video input and `AVCaptureVideoDataOutputSampleBufferDelegate` for frame processing.
-- Integrates Roboflow for object detection.
-- Integrates TrackSS (SORT) for tracking "Goal Leg" objects.
-- Draws overlays for detected and tracked objects.
+### 6. CameraViewController (UIKit)
+- Handles frame capture, object detection, overlay drawing, and delegates camera setup to `CameraManager`.
+- Integrates Roboflow for object detection and TrackSS (SORT) for tracking "Goal Leg" objects.
+- Draws overlays for detected and tracked objects using `BoundingBoxDrawer` and configuration from `CameraConstants`.
+- Uses the shared model instance (`sharedRFModel`) for detection, ensuring persistence across camera opens.
+- **How to use:** Extend or modify this class for additional overlay types or detection logic. Use the provided helpers and constants for consistency. Always use the shared model reference for detection.
+- **Warning:** Always clear overlays each frame using `removeBoundingBoxes()` to prevent UI artifacts. Do not instantiate a new model unless you intend to reload it for all camera sessions.
 
-#### Key Properties:
-- `captureSession`: Manages camera input/output.
-- `previewLayer`: Displays the camera feed.
-- `overlayView`: Draws bounding boxes and overlays.
-- `boundingBoxLayers`: Stores overlay layers for easy removal.
-- `goalLegTracker`: Manages tracking of "Goal Leg" objects.
-
-#### Key Methods:
-- `setupCamera()`: Configures camera and preview.
-- `loadRoboflowModel()`: Loads the detection model.
-- `captureOutput(...)`: Processes each frame, runs detection, updates tracker, and draws overlays.
-- `drawTrackedGoalLegs(...)`: Draws tracked "Goal Leg" boxes with persistent IDs.
-- `drawBoundingBoxes(...)`: Draws other detected objects (balls, etc).
-- `removeBoundingBoxes()`: Clears overlays each frame.
-
-### 4. GoalLegTrackerManager
+### 7. GoalLegTrackerManager
 - Encapsulates the SORT tracker logic for "Goal Leg" objects.
 - Converts detections to the format required by TrackSS.
 - Updates and stores tracked objects for overlay drawing.
+- Delegates ghost leg management to `GhostLegManager`.
+
+### 8. GhostLegManager
+- Handles ghost leg persistence, proximity-based removal, and lifecycle management.
+- **How to use:** Use `addGhostLeg`, `removeGhostLegIfClose`, and `limitGhostLegs` to manage ghost leg overlays.
+- **Warning:** Ghost legs are only removed if a new goal leg appears close enough (see `goalLegThreshold`). Tune this value in `CameraConstants` if needed.
 
 ---
 
 ## Object Detection & Tracking Flow
 1. **Camera Setup:**
-   - Camera is initialized and preview is displayed.
+   - Camera is initialized via `CameraManager` and preview is displayed.
 2. **Frame Capture:**
    - Each frame is captured and converted to a UIImage.
 3. **Object Detection:**
@@ -56,19 +86,46 @@
    - Tracker returns persistent bounding boxes with IDs.
 5. **Overlay Drawing:**
    - Tracked "Goal Leg" boxes are drawn in orange with their IDs.
+   - Ghost legs (last known positions of lost goal legs) are drawn in gray with their IDs, as placeholders until the real goal leg returns.
    - Other detected objects (balls) are drawn in their respective colors.
-6. **Overlay Cleanup:**
+6. **Ghost Leg Lifecycle:**
+   - When a goal leg disappears, its last position becomes a ghost leg if there are 3 or fewer alive goal legs.
+   - When a new goal leg appears, the system checks for nearby ghost legs and removes the closest one if within a threshold distance, ensuring ghosts are only replaced by their real counterparts.
+   - The total number of goal legs (tracked + ghosts) is capped at 4 to prevent overlap and maintain UI clarity.
+7. **Overlay Cleanup:**
    - Overlays are cleared before drawing new ones each frame.
 
 ---
 
 ## Extensibility
 - The tracking system is modular and can be extended to track other object classes by adding new tracker managers.
-- Overlay drawing logic is separated for tracked and detected objects.
+- Overlay drawing logic is separated for tracked and detected objects via `BoundingBoxDrawer`.
+- All configuration values are centralized in `CameraConstants` for easy tuning.
 
 ---
 
 ## Changelog
+### 2025-07-27 (Pause/Unpause, X Button, FPS Counter)
+- Added Pause/Unpause button: toggles object detection, persists overlay while paused, styled for compact UI.
+- Added X button: allows user to exit camera view, styled for transparency and compactness.
+- Added FPS counter: shows current frame rate in a compact overlay, styled to match other controls.
+### 2025-07-27 (Model Persistence & Loading Overlay)
+- Added `hasLoadedModel` and `sharedRFModel` at file scope to persist the loaded Roboflow model instance across camera opens.
+- Updated `CameraViewController` to reuse the loaded model and avoid reloading, ensuring detection works after reopening the camera.
+- Improved loading overlay logic: only shows on first open, not on subsequent opens.
+- Fixed state modification during view update by dispatching state changes asynchronously.
+- **Warning:** Always use the shared model reference (`sharedRFModel`) for detection. Do not instantiate a new model unless you intend to reload it for all camera sessions.
+### 2025-07-27 (Constants & Modularization)
+- Added `CameraConstants` struct to centralize all configuration values for overlays and tracking logic.
+- Added `CameraManager` class to handle camera setup and session management.
+- Added `BoundingBoxDrawer` helper for overlay drawing.
+- Refactored overlay drawing and ghost leg logic to use helpers and constants.
+- Updated documentation to explain usage and warnings for new helpers and constants.
+
+### 2025-07-27 (Ghost Leg Persistence)
+- Added ghost leg persistence: lost goal legs are shown as gray placeholders until their real counterpart returns.
+- Implemented proximity-based ghost removal: newborn goal legs replace nearby ghost legs, preventing flicker and overlap issues.
+- Capped total goal legs (tracked + ghosts) at 4 for UI clarity.
 
 ### 2025-07-27
 - Integrated TrackSS (SORT) for persistent tracking of "Goal Leg" objects.
@@ -76,4 +133,32 @@
 - Added ID overlays for tracked objects.
 - Improved type handling for tracker input/output.
 - Added SwiftUI import for compatibility.
+
+---
+
+## Developer Notes & Warnings
+- **Pause/Unpause:** Pausing detection keeps the last overlay visible. Changing orientation while paused does not reset ghost legs.
+- **X Button:** Dismisses the camera view. Ensure the button is always accessible, even during loading.
+- **FPS Counter:** FPS is updated each frame and shown in the UI. Keep the overlay compact and styled consistently.
+- **Model Persistence:** The Roboflow model is loaded once per app session and reused for all camera sessions. If you need to reload the model, update `sharedRFModel` and `hasLoadedModel` accordingly.
+- **Loading Overlay:** The loading overlay only appears the first time the camera is opened. Subsequent opens use the already-loaded model and skip the overlay.
+- **State Changes:** State changes for model loading are dispatched asynchronously to avoid modifying state during view updates. Do not update SwiftUI state directly inside UIKit lifecycle methods.
+- **Always use `CameraConstants` for configuration:** This ensures overlays and logic remain consistent and easy to tune.
+- **Always clear overlays each frame:** Use `removeBoundingBoxes()` to prevent UI artifacts and memory leaks.
+- **Do not duplicate camera setup logic:** Use `CameraManager` for all session and preview management.
+- **Append all overlay layers to `boundingBoxLayers`:** This is required for proper cleanup.
+- **Tune ghost leg threshold carefully:** If set too high, ghosts may be removed incorrectly; if too low, ghosts may persist too long.
+- **Extend with care:** When adding new overlay types or trackers, use the provided helpers and constants for consistency.
+
+## TODO
+- Add camera panning detection to make ghosts track better
+- Add SORT tracking to "Red Ball" and "Blue Ball" objects, with lifecycle to prevent flickering
+- Add Control Zone detection through "Goal Leg" position tracking. Make python script that lets me find pixel coordinates of lines of pipes, including control zones. Then, make the coordinates scale to the live distances of the goal legs. Use the lines to find balls within the goals and then score them. Start out scoring with a simple overlay on each ball, making it have green text on the outside goals and orange text on the control zones. Remember to give ample context as to how the goals work in the real game (size limits, middle has no control)
+- Add live scoring with transparent overlay
+- Add goal control changes to overlay
+- Make model load while app opens up so it is instantly ready for use
+
+
+
+
 
