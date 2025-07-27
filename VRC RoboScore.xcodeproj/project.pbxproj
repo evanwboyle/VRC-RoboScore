@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		762979C82E35DF4600FF4A80 /* Roboflow in Frameworks */ = {isa = PBXBuildFile; productRef = 762979C72E35DF4600FF4A80 /* Roboflow */; };
+		762979CB2E35EB0400FF4A80 /* TrackSS in Frameworks */ = {isa = PBXBuildFile; productRef = 762979CA2E35EB0400FF4A80 /* TrackSS */; };
 		7638A0432E0ED50300AA89C4 /* PythonKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7638A0422E0ED50300AA89C4 /* PythonKit */; };
 /* End PBXBuildFile section */
 
@@ -56,6 +58,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				762979CB2E35EB0400FF4A80 /* TrackSS in Frameworks */,
+				762979C82E35DF4600FF4A80 /* Roboflow in Frameworks */,
 				7638A0432E0ED50300AA89C4 /* PythonKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -118,6 +122,8 @@
 			name = "VRC RoboScore";
 			packageProductDependencies = (
 				7638A0422E0ED50300AA89C4 /* PythonKit */,
+				762979C72E35DF4600FF4A80 /* Roboflow */,
+				762979CA2E35EB0400FF4A80 /* TrackSS */,
 			);
 			productName = "VRC RoboScore";
 			productReference = 7622779A2DD630260039E6C3 /* VRC RoboScore.app */;
@@ -203,6 +209,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7638A0412E0ED50300AA89C4 /* XCRemoteSwiftPackageReference "PythonKit" */,
+				762979C62E35DF4600FF4A80 /* XCRemoteSwiftPackageReference "swift-sdk" */,
+				762979C92E35E99E00FF4A80 /* XCRemoteSwiftPackageReference "TrackSS" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7622779B2DD630260039E6C3 /* Products */;
@@ -581,6 +589,22 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		762979C62E35DF4600FF4A80 /* XCRemoteSwiftPackageReference "swift-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/roboflow/swift-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.2.4;
+			};
+		};
+		762979C92E35E99E00FF4A80 /* XCRemoteSwiftPackageReference "TrackSS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ShreshthSaxena/TrackSS/";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 		7638A0412E0ED50300AA89C4 /* XCRemoteSwiftPackageReference "PythonKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/pvieito/PythonKit.git";
@@ -592,6 +616,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		762979C72E35DF4600FF4A80 /* Roboflow */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 762979C62E35DF4600FF4A80 /* XCRemoteSwiftPackageReference "swift-sdk" */;
+			productName = Roboflow;
+		};
+		762979CA2E35EB0400FF4A80 /* TrackSS */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 762979C92E35E99E00FF4A80 /* XCRemoteSwiftPackageReference "TrackSS" */;
+			productName = TrackSS;
+		};
 		7638A0422E0ED50300AA89C4 /* PythonKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 7638A0412E0ED50300AA89C4 /* XCRemoteSwiftPackageReference "PythonKit" */;
