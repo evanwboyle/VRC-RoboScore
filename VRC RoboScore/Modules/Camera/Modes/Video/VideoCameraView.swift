@@ -1,137 +1,10 @@
-// MARK: - Field Overlay Manager
-struct FieldOverlayManager {
-    private var cachedReferencePolygon: [CGPoint]?
-    private var hasPrintedReferencePolygon = false
-    
-    mutating func getReferencePolygon() -> [CGPoint]? {
-        if cachedReferencePolygon == nil {
-            if let refCenters = getReferencePolygonCenters() {
-                cachedReferencePolygon = orderVerticesClockwise(refCenters)
-                if !hasPrintedReferencePolygon {
-                    print("Reference Polygon Centers:")
-                    for (i, pt) in cachedReferencePolygon!.enumerated() {
-                        print("  [\(i)]: (x: \(pt.x), y: \(pt.y))")
-                    }
-                    hasPrintedReferencePolygon = true
-                }
-            }
-        }
-        return cachedReferencePolygon
-    }
-    
-    func getLivePolygon(from tracker: GoalLegTrackerManager) -> [CGPoint]? {
-        var centers: [CGPoint] = []
-        let allLegs = tracker.trackedGoalLegs + tracker.ghostLegs
-        if allLegs.count == 4 {
-            for leg in allLegs {
-                if leg.count >= 4 {
-                    let cx = (leg[0] + leg[2]) / 2.0
-                    let cy = (leg[1] + leg[3]) / 2.0
-                    centers.append(CGPoint(x: cx, y: cy))
-                }
-            }
-            return orderVerticesClockwise(centers)
-        }
-        return nil
-    }
-    
-    private func getReferencePolygonCenters() -> [CGPoint]? {
-        guard let annotations = FieldAnnotationLoader.loadAnnotations(from: Bundle.main.path(forResource: "VexFieldAnnotations", ofType: "json") ?? "") else { return nil }
-        let legs = annotations.goalLegs
-        if legs.count == 4 {
-            return legs.map { $0.center }
-        }
-        return nil
-    }
-    
-    private func orderVerticesClockwise(_ vertices: [CGPoint]) -> [CGPoint] {
-        guard vertices.count == 4 else { return vertices }
-        let centroid = CGPoint(
-            x: vertices.map { $0.x }.reduce(0, +) / 4.0,
-            y: vertices.map { $0.y }.reduce(0, +) / 4.0
-        )
-        return vertices.sorted { a, b in
-            let angleA = atan2(a.y - centroid.y, a.x - centroid.x)
-            let angleB = atan2(b.y - centroid.y, b.x - centroid.x)
-            return angleA < angleB
-        }
-    }
-}
+
 
 // MARK: - Model Load Flag
 /// Tracks if the Roboflow model has loaded in this app session (prevents loading overlay on subsequent opens)
 fileprivate var hasLoadedModel: Bool = false
 /// Persists the loaded Roboflow model instance across camera opens
 fileprivate var sharedRFModel: RFModel? = nil
-// MARK: - Camera Constants
-/// CameraConstants: All configuration values for camera overlays and tracking logic.
-struct CameraConstants {
-    static let pauseButtonHeight: CGFloat = 28
-    static let pauseButtonWidth: CGFloat = 72
-    static let pauseButtonCornerRadius: CGFloat = 7
-    static let pauseButtonFontSize: CGFloat = 13
-    static let pauseButtonBackgroundOpacity: Double = 0.18
-    static let pauseButtonTextOpacity: Double = 0.92
-    // --- Camera Button UI ---
-    static let cameraButtonBackgroundOpacity: Double = 0.18
-    static let cameraButtonIconOpacity: Double = 0.92
-    static let cameraButtonSize: CGFloat = 32
-    static let cameraButtonIconSize: CGFloat = 16
-    static let cameraButtonPadding: CGFloat = 16
-    static let cameraButtonSpacing: CGFloat = 8
-    static let fpsCounterFontSize: CGFloat = 14
-    static let fpsCounterBackgroundOpacity: Double = 0.18
-    static let fpsCounterTextOpacity: Double = 0.92
-    // --- Tracking Logic ---
-    /// Maximum distance (pixels) to match ghost legs to newborn goal legs
-    static let goalLegThreshold: Double = 60.0
-    /// Maximum number of goal legs (tracked + ghosts) to display
-    static let maxGoalLegs: Int = 4
-
-    // --- Tracked Goal Leg Overlay ---
-    /// Border color for tracked goal leg overlays
-    static let trackedBorderColor: UIColor = .orange
-    /// Border width for tracked goal leg overlays
-    static let trackedBorderWidth: CGFloat = 4
-    /// Label color for tracked goal leg overlays
-    static let trackedLabelColor: UIColor = .orange
-    /// Label width for tracked goal leg overlays
-    static let trackedLabelWidth: CGFloat = 60
-    /// Label height for tracked goal leg overlays
-    static let trackedLabelHeight: CGFloat = 20
-    /// Font size for tracked goal leg labels
-    static let trackedLabelFontSize: CGFloat = 14
-
-    // --- Ghost Leg Overlay ---
-    /// Border color for ghost leg overlays
-    static let ghostBorderColor: UIColor = .systemGray
-    /// Border width for ghost leg overlays
-    static let ghostBorderWidth: CGFloat = 2
-    /// Label color for ghost leg overlays
-    static let ghostLabelColor: UIColor = .systemGray
-    /// Label width for ghost leg overlays
-    static let ghostLabelWidth: CGFloat = 80
-    /// Label height for ghost leg overlays
-    static let ghostLabelHeight: CGFloat = 20
-    /// Font size for ghost leg labels
-    static let ghostLabelFontSize: CGFloat = 14
-
-    // --- Ball Overlay ---
-    /// Border width for ball overlays
-    static let ballBorderWidth: CGFloat = 3
-    /// Label width for ball overlays
-    static let ballLabelWidth: CGFloat = 80
-    /// Label height for ball overlays
-    static let ballLabelHeight: CGFloat = 20
-    /// Font size for ball labels
-    static let ballLabelFontSize: CGFloat = 14
-    /// Border color for red ball overlays
-    static let redBallColor: UIColor = .red
-    /// Border color for blue ball overlays
-    static let blueBallColor: UIColor = .blue
-    /// Default border color for ball overlays
-    static let defaultBallColor: UIColor = .red
-}
 
 // MARK: - CameraManager
 class CameraManager {
@@ -164,38 +37,7 @@ class CameraManager {
         }
     }
 }
-// MARK: - BoundingBoxDrawer
-class BoundingBoxDrawer {
-    static func drawBox(on overlayView: UIView, previewLayer: AVCaptureVideoPreviewLayer, rect: [Double], imageSize: CGSize, color: UIColor, borderWidth: CGFloat, label: String, labelColor: UIColor, labelWidth: CGFloat = 60, labelHeight: CGFloat = 20, labelFontSize: CGFloat = 14) -> CAShapeLayer? {
-        guard rect.count >= 4 else { return nil }
-        let x1 = CGFloat(rect[0])
-        let y1 = CGFloat(rect[1])
-        let x2 = CGFloat(rect[2])
-        let y2 = CGFloat(rect[3])
-        let width = x2 - x1
-        let height = y2 - y1
-        let normX = x1 / imageSize.width
-        let normY = y1 / imageSize.height
-        let normWidth = width / imageSize.width
-        let normHeight = height / imageSize.height
-        let normalizedRect = CGRect(x: normX, y: normY, width: normWidth, height: normHeight)
-        let convertedRect = previewLayer.layerRectConverted(fromMetadataOutputRect: normalizedRect)
-        let boxLayer = CAShapeLayer()
-        boxLayer.frame = convertedRect
-        boxLayer.borderColor = color.cgColor
-        boxLayer.borderWidth = borderWidth
-        boxLayer.cornerRadius = 6
-        boxLayer.masksToBounds = true
-        let idLabel = CATextLayer()
-        idLabel.string = label
-        idLabel.fontSize = labelFontSize
-        idLabel.foregroundColor = labelColor.cgColor
-        idLabel.frame = CGRect(x: 0, y: 0, width: labelWidth, height: labelHeight)
-        boxLayer.addSublayer(idLabel)
-        overlayView.layer.addSublayer(boxLayer)
-        return boxLayer
-    }
-}
+
 import SwiftUI
 import AVFoundation
 import Roboflow
@@ -589,7 +431,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                     // Draw overlays from last frame
                     self.drawPausedOverlays(predictions: predictions, imageSize: imageSize)
                 }
-                self.drawPolygonsOverlay()
+                self.drawFieldOverlay()
                 self.isProcessingFrame = false
             }
             return
@@ -614,7 +456,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                     }
                     // Draw other bounding boxes (balls, etc)
                     self?.drawBoundingBoxes(predictions: predictions, imageSize: image.size, skipGoalLegs: true)
-                    self?.drawPolygonsOverlay()
+                    self?.drawFieldOverlay()
                     self?.lastOverlays = (predictions, image.size)
                 } else {
                     print("Predictions: \(String(describing: predictions))")
@@ -632,7 +474,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
             self.drawGhostLegs(imageSize: imageSize)
         }
         self.drawBoundingBoxes(predictions: predictions, imageSize: imageSize, skipGoalLegs: true)
-        self.drawPolygonsOverlay()
+        self.drawFieldOverlay()
     }
 
     // Draw tracked Goal Legs using SORT output
@@ -813,9 +655,9 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
 
     private var fieldOverlayManager = FieldOverlayManager()
     
-    private func drawPolygonsOverlay() {
+    private func drawFieldOverlay() {
         guard let previewLayer = cameraManager.previewLayer else { return }
-        let imageSize = getCurrentImageSize()
+        let imageSize = CameraGeometryUtils.getCurrentImageSize(lastOverlays: lastOverlays)
         var ballCounts: [String: (blue: Int, red: Int)] = [
             "LG1CZ": (0, 0), "LG1LR": (0, 0),
             "LG2CZ": (0, 0), "LG2LR": (0, 0),
@@ -827,15 +669,19 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         var shortGoals: [(name: String, line: (CGPoint, CGPoint))] = []
         // Draw live polygon in light green
         if let livePolygon = fieldOverlayManager.getLivePolygon(from: goalLegTracker) {
-            drawPolygon(vertices: livePolygon,
-                       color: UIColor.systemGreen.withAlphaComponent(0.7),
-                       lineWidth: 4.0,
-                       imageSize: imageSize,
-                       previewLayer: previewLayer)
+            CameraGeometryUtils.drawPolygon(
+            vertices: livePolygon,
+            color: UIColor.systemGreen.withAlphaComponent(0.7),
+            lineWidth: 4.0,
+            imageSize: imageSize,
+            overlayView: overlayView,
+            previewLayer: previewLayer,
+            boundingBoxLayers: &boundingBoxLayers
+            )
             // --- Draw overlays for long/short goals ---
             drawRelativeGoalOverlays(on: livePolygon, imageSize: imageSize, previewLayer: previewLayer)
             // --- Prepare goal segments for collision ---
-            let ordered = orderVerticesClockwise(livePolygon)
+            let ordered = CameraGeometryUtils.orderVerticesClockwise(livePolygon)
             let longGoalPercents: [[(y: CGFloat, x: CGFloat)]] = longGoalPercentsBinding?.wrappedValue ?? []
             let shortGoalPercents: [[(y: CGFloat, x: CGFloat)]] = shortGoalPercentsBinding?.wrappedValue ?? []
             let controlZonePercent: CGFloat = controlZonePercentBinding?.wrappedValue ?? 30.0
@@ -887,11 +733,15 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         }
         // Draw reference polygon in dark blue
         if let refPolygon = fieldOverlayManager.getReferencePolygon() {
-            drawPolygon(vertices: refPolygon,
-                       color: UIColor.systemBlue.withAlphaComponent(0.85),
-                       lineWidth: 3.0,
-                       imageSize: CGSize(width: 5712, height: 4284),
-                       previewLayer: previewLayer)
+            CameraGeometryUtils.drawPolygon(
+            vertices: refPolygon,
+            color: UIColor.systemBlue.withAlphaComponent(0.85),
+            lineWidth: 3.0,
+            imageSize: CGSize(width: 5712, height: 4284),
+            overlayView: overlayView,
+            previewLayer: previewLayer,
+            boundingBoxLayers: &boundingBoxLayers
+            )
         }
         // --- Ball categorization logic ---
         // Get balls from lastOverlays
@@ -919,7 +769,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                 var assigned: String? = nil
                 for (cat, lines) in priorities {
                     for line in lines {
-                        if ballIntersectsLine(ballCenter: ball.center, ballRadius: ball.radius, line: line) {
+                        if CameraGeometryUtils.ballIntersectsLine(ballCenter: ball.center, ballRadius: ball.radius, line: line) {
                             assigned = cat
                             break
                         }
@@ -953,20 +803,6 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         }
         // --- Draw overlay rectangle with averaged counts ---
         drawBallCountOverlay(ballCounts: averagedCounts)
-    }
-
-    /// Returns true if the ball (center, radius) intersects the line segment
-    private func ballIntersectsLine(ballCenter: CGPoint, ballRadius: CGFloat, line: (CGPoint, CGPoint)) -> Bool {
-        // Closest point on line segment to ball center
-        let (p1, p2) = line
-        let dx = p2.x - p1.x
-        let dy = p2.y - p1.y
-        let length = sqrt(dx*dx + dy*dy)
-        if length == 0 { return false }
-        let t = max(0, min(1, ((ballCenter.x - p1.x) * dx + (ballCenter.y - p1.y) * dy) / (length * length)))
-        let closest = CGPoint(x: p1.x + t * dx, y: p1.y + t * dy)
-        let dist = hypot(ballCenter.x - closest.x, ballCenter.y - closest.y)
-        return dist <= ballRadius
     }
 
     /// Draws the semi-transparent bezeled rectangle overlay with ball counts
@@ -1169,7 +1005,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     /// Draws overlays for long and short goals using live polygon and computed ratios/percentages
     private func drawRelativeGoalOverlays(on polygon: [CGPoint], imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) {
         guard polygon.count == 4 else { return }
-        let ordered = orderVerticesClockwise(polygon)
+        let ordered = CameraGeometryUtils.orderVerticesClockwise(polygon)
         // --- Long Goals ---
         let longGoalPercents: [[(y: CGFloat, x: CGFloat)]] = longGoalPercentsBinding?.wrappedValue ?? []
         let shortGoalPercents: [[(y: CGFloat, x: CGFloat)]] = shortGoalPercentsBinding?.wrappedValue ?? []
@@ -1223,8 +1059,8 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
 
     /// Draws a line between two points on the overlay
     private func drawLine(from: CGPoint, to: CGPoint, color: UIColor, lineWidth: CGFloat, imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) {
-        let p1 = convertPoint(from, imageSize: imageSize, previewLayer: previewLayer)
-        let p2 = convertPoint(to, imageSize: imageSize, previewLayer: previewLayer)
+        let p1 = CameraGeometryUtils.convertPoint(from, imageSize: imageSize, previewLayer: previewLayer)
+        let p2 = CameraGeometryUtils.convertPoint(to, imageSize: imageSize, previewLayer: previewLayer)
         let path = UIBezierPath()
         path.move(to: p1)
         path.addLine(to: p2)
@@ -1234,21 +1070,6 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         shapeLayer.lineWidth = lineWidth
         overlayView.layer.addSublayer(shapeLayer)
         boundingBoxLayers.append(shapeLayer)
-    }
-    
-    /// Helper method to draw a point for debugging transforms
-    private func drawPoint(at point: CGPoint, color: UIColor, radius: CGFloat, imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) {
-        let convertedPoint = convertPoint(point, imageSize: imageSize, previewLayer: previewLayer)
-        let pointLayer = CAShapeLayer()
-        let path = UIBezierPath(arcCenter: convertedPoint,
-                               radius: radius,
-                               startAngle: 0,
-                               endAngle: 2 * .pi,
-                               clockwise: true)
-        pointLayer.path = path.cgPath
-        pointLayer.fillColor = color.cgColor
-        overlayView.layer.addSublayer(pointLayer)
-        boundingBoxLayers.append(pointLayer)
     }
 
     /// Returns the centers of the live polygon (tracked + ghost goal legs)
@@ -1278,53 +1099,6 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         return nil
     }
 
-    /// Draws a polygon on the overlay view given a list of CGPoint vertices
-    private func drawPolygon(vertices: [CGPoint], color: UIColor, lineWidth: CGFloat = 3.0, imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) {
-        guard vertices.count == 4 else { return }
-        let path = UIBezierPath()
-        path.move(to: convertPoint(vertices[0], imageSize: imageSize, previewLayer: previewLayer))
-        for i in 1..<vertices.count {
-            path.addLine(to: convertPoint(vertices[i], imageSize: imageSize, previewLayer: previewLayer))
-        }
-        path.close()
-        let shapeLayer = CAShapeLayer()
-        shapeLayer.path = path.cgPath
-        shapeLayer.strokeColor = color.cgColor
-        shapeLayer.fillColor = UIColor.clear.cgColor
-        shapeLayer.lineWidth = lineWidth
-        overlayView.layer.addSublayer(shapeLayer)
-        boundingBoxLayers.append(shapeLayer)
-    }
-    /// Orders 4 vertices clockwise around their centroid
-    private func orderVerticesClockwise(_ vertices: [CGPoint]) -> [CGPoint] {
-        guard vertices.count == 4 else { return vertices }
-        let centroid = CGPoint(
-            x: vertices.map { $0.x }.reduce(0, +) / 4.0,
-            y: vertices.map { $0.y }.reduce(0, +) / 4.0
-        )
-        return vertices.sorted { a, b in
-            let angleA = atan2(a.y - centroid.y, a.x - centroid.x)
-            let angleB = atan2(b.y - centroid.y, b.x - centroid.x)
-            return angleA < angleB
-        }
-    }
-
-    /// Gets the current image size from the last frame (fallback to 5712x4284 if unavailable)
-    private func getCurrentImageSize() -> CGSize {
-        if let overlays = lastOverlays {
-            return overlays.1
-        }
-        return CGSize(width: 5712, height: 4284)
-    }
-
-    /// Converts a CGPoint from image coordinates to preview layer coordinates
-    private func convertPoint(_ point: CGPoint, imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) -> CGPoint {
-        let normX = point.x / imageSize.width
-        let normY = point.y / imageSize.height
-        let normalizedRect = CGRect(x: normX, y: normY, width: 0.001, height: 0.001)
-        let convertedRect = previewLayer.layerRectConverted(fromMetadataOutputRect: normalizedRect)
-        return CGPoint(x: convertedRect.origin.x, y: convertedRect.origin.y)
-    }
 }
 
 // Helper: Convert CVPixelBuffer to UIImage
