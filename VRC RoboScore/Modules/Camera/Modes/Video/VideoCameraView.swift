@@ -334,15 +334,71 @@ class GoalLegTrackerManager {
 
 struct FieldCameraView: View {
     @Binding var isPresented: Bool
+    @ObservedObject var gameState: GameState
     @State private var isPaused: Bool = false
     @State private var fps: Double = 0.0
     @State private var isModelLoaded: Bool = false
+    @State var longGoalPercents: [[(y: CGFloat, x: CGFloat)]] = [
+        [(58.0, 0.0), (55.0, 105.0)], // Long Goal 1 (y%, x%) for each endpoint
+        [(-14.0, 32.0), (-14.0, 66.0)]  // Long Goal 2
+    ]
+    @State var controlZonePercent: CGFloat = 30.0
+    @State var shortGoalPercents: [[(y: CGFloat, x: CGFloat)]] = [
+        [(26.0, 57.07), (39.0, 40.0)], // Short Goal 1
+        [(19.0, 60.0), (10.0, 42.0)]  // Short Goal 2
+    ]
+    @State var ballCountAverageWindow: Int = 10
+    @State private var showValueEditor: Bool = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            CameraViewControllerRepresentable(isPaused: $isPaused, fps: $fps, isModelLoaded: $isModelLoaded)
-                .edgesIgnoringSafeArea(.all)
-            ZStack {
+            CameraViewControllerRepresentable(
+                isPaused: $isPaused,
+                fps: $fps,
+                isModelLoaded: $isModelLoaded,
+                longGoalPercents: $longGoalPercents,
+                shortGoalPercents: $shortGoalPercents,
+                controlZonePercent: $controlZonePercent,
+                ballCountAverageWindow: $ballCountAverageWindow,
+                gameState: gameState
+            )
+            .edgesIgnoringSafeArea(.all)
+            VStack(spacing: 0) {
+                // Top bar: X button, pause, FPS, and score
+                HStack(spacing: CameraConstants.cameraButtonSpacing) {
+                    Button(action: { isPresented = false }) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.black.opacity(CameraConstants.cameraButtonBackgroundOpacity))
+                                .frame(width: CameraConstants.cameraButtonSize, height: CameraConstants.cameraButtonSize)
+                            Image(systemName: "xmark")
+                                .resizable()
+                                .frame(width: CameraConstants.cameraButtonIconSize, height: CameraConstants.cameraButtonIconSize)
+                                .foregroundColor(Color.black.opacity(CameraConstants.cameraButtonIconOpacity))
+                        }
+                    }
+                    Button(action: { isPaused.toggle() }) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: CameraConstants.pauseButtonCornerRadius)
+                                .fill(Color.black.opacity(CameraConstants.pauseButtonBackgroundOpacity))
+                                .frame(width: CameraConstants.pauseButtonWidth, height: CameraConstants.pauseButtonHeight)
+                            Text(isPaused ? "Unpause" : "Pause")
+                                .font(.system(size: CameraConstants.pauseButtonFontSize, weight: .bold))
+                                .foregroundColor(Color.black.opacity(CameraConstants.pauseButtonTextOpacity))
+                        }
+                    }
+                    Spacer()
+                    ZStack {
+                        RoundedRectangle(cornerRadius: CameraConstants.pauseButtonCornerRadius)
+                            .fill(Color.black.opacity(CameraConstants.pauseButtonBackgroundOpacity))
+                            .frame(width: CameraConstants.pauseButtonWidth, height: CameraConstants.pauseButtonHeight)
+                        Text(String(format: "FPS: %.1f", fps))
+                            .font(.system(size: CameraConstants.pauseButtonFontSize, weight: .bold))
+                            .foregroundColor(Color.black.opacity(CameraConstants.pauseButtonTextOpacity))
+                    }
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 4)
                 if !isModelLoaded && !hasLoadedModel {
                     Color.black.opacity(0.45).edgesIgnoringSafeArea(.all)
                     VStack(spacing: 24) {
@@ -353,70 +409,8 @@ struct FieldCameraView: View {
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(.white)
                     }
-                    // X button on loading screen
-                    VStack {
-                        HStack {
-                            Button(action: {
-                                isPresented = false
-                            }) {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.black.opacity(CameraConstants.cameraButtonBackgroundOpacity))
-                                        .frame(width: CameraConstants.cameraButtonSize, height: CameraConstants.cameraButtonSize)
-                                    Image(systemName: "xmark")
-                                        .resizable()
-                                        .frame(width: CameraConstants.cameraButtonIconSize, height: CameraConstants.cameraButtonIconSize)
-                                        .foregroundColor(Color.black.opacity(CameraConstants.cameraButtonIconOpacity))
-                                }
-                            }
-                            Spacer()
-                        }
-                        .padding([.top, .leading, .trailing], CameraConstants.cameraButtonPadding)
-                        Spacer()
-                    }
                 }
-                if isModelLoaded {
-                    VStack {
-                        HStack(spacing: CameraConstants.cameraButtonSpacing) {
-                            Button(action: {
-                                isPresented = false
-                            }) {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.black.opacity(CameraConstants.cameraButtonBackgroundOpacity))
-                                        .frame(width: CameraConstants.cameraButtonSize, height: CameraConstants.cameraButtonSize)
-                                    Image(systemName: "xmark")
-                                        .resizable()
-                                        .frame(width: CameraConstants.cameraButtonIconSize, height: CameraConstants.cameraButtonIconSize)
-                                        .foregroundColor(Color.black.opacity(CameraConstants.cameraButtonIconOpacity))
-                                }
-                            }
-                            Button(action: {
-                                isPaused.toggle()
-                            }) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: CameraConstants.pauseButtonCornerRadius)
-                                        .fill(Color.black.opacity(CameraConstants.pauseButtonBackgroundOpacity))
-                                        .frame(width: CameraConstants.pauseButtonWidth, height: CameraConstants.pauseButtonHeight)
-                                    Text(isPaused ? "Unpause" : "Pause")
-                                        .font(.system(size: CameraConstants.pauseButtonFontSize, weight: .bold))
-                                        .foregroundColor(Color.black.opacity(CameraConstants.pauseButtonTextOpacity))
-                                }
-                            }
-                            Spacer()
-                            ZStack {
-                                RoundedRectangle(cornerRadius: CameraConstants.pauseButtonCornerRadius)
-                                    .fill(Color.black.opacity(CameraConstants.pauseButtonBackgroundOpacity))
-                                    .frame(width: CameraConstants.pauseButtonWidth, height: CameraConstants.pauseButtonHeight)
-                                Text(String(format: "FPS: %.1f", fps))
-                                    .font(.system(size: CameraConstants.pauseButtonFontSize, weight: .bold))
-                                    .foregroundColor(Color.black.opacity(CameraConstants.pauseButtonTextOpacity))
-                            }
-                        }
-                        .padding([.top, .leading, .trailing], CameraConstants.cameraButtonPadding)
-                        Spacer()
-                    }
-                }
+                Spacer()
             }
         }
     }
@@ -426,22 +420,50 @@ struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
     @Binding var isPaused: Bool
     @Binding var fps: Double
     @Binding var isModelLoaded: Bool
+    @Binding var longGoalPercents: [[(y: CGFloat, x: CGFloat)]]
+    @Binding var shortGoalPercents: [[(y: CGFloat, x: CGFloat)]]
+    @Binding var controlZonePercent: CGFloat
+    @Binding var ballCountAverageWindow: Int
+
+    var gameState: GameState
 
     func makeUIViewController(context: Context) -> CameraViewController {
         let vc = CameraViewController()
         vc.isPausedBinding = $isPaused
         vc.fpsBinding = $fps
         vc.isModelLoadedBinding = $isModelLoaded
+        vc.longGoalPercentsBinding = $longGoalPercents
+        vc.shortGoalPercentsBinding = $shortGoalPercents
+        vc.controlZonePercentBinding = $controlZonePercent
+        vc.ballCountAverageWindowBinding = $ballCountAverageWindow
+        vc.gameState = gameState
         return vc
     }
     func updateUIViewController(_ uiViewController: CameraViewController, context: Context) {
         uiViewController.isPausedBinding = $isPaused
         uiViewController.fpsBinding = $fps
         uiViewController.isModelLoadedBinding = $isModelLoaded
+        uiViewController.longGoalPercentsBinding = $longGoalPercents
+        uiViewController.shortGoalPercentsBinding = $shortGoalPercents
+        uiViewController.controlZonePercentBinding = $controlZonePercent
+        uiViewController.ballCountAverageWindowBinding = $ballCountAverageWindow
+        uiViewController.gameState = gameState
     }
 }
 
 class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
+    var gameState: GameState!
+    var longGoalPercentsBinding: Binding<[[ (y: CGFloat, x: CGFloat) ]]>? = nil
+    var shortGoalPercentsBinding: Binding<[[ (y: CGFloat, x: CGFloat) ]]>? = nil
+    var controlZonePercentBinding: Binding<CGFloat>? = nil
+    var ballCountAverageWindowBinding: Binding<Int>? = nil
+    private var ballCountBuffer: [[String: (blue: Int, red: Int)]] = []
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Invalidate FPS timer when view disappears
+        fpsTimer?.invalidate()
+        fpsTimer = nil
+    }
     private let cameraManager = CameraManager()
     private var overlayView: UIView! // Overlay for bounding boxes
     private var boundingBoxLayers: [CAShapeLayer] = []
@@ -464,6 +486,11 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     var fpsBinding: Binding<Double>? = nil
     var isModelLoadedBinding: Binding<Bool>? = nil
     private var lastFrameTimestamp: CFTimeInterval = CACurrentMediaTime()
+    // FPS timer-based counter
+    private var frameCount: Int = 0
+    private var fpsTimer: Timer?
+    private var frameCountsBuffer: [Int] = []
+    private let fpsBufferSize = 5
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -481,6 +508,22 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         cameraManager.startSession()
         loadRoboflowModel()
         FieldAnnotationLoader.testLoadAnnotations()
+        // Start FPS timer
+        fpsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            // Add current frameCount to buffer
+            self.frameCountsBuffer.append(self.frameCount)
+            if self.frameCountsBuffer.count > self.fpsBufferSize {
+                self.frameCountsBuffer.removeFirst()
+            }
+            // Calculate average FPS over buffer
+            let sum = self.frameCountsBuffer.reduce(0, +)
+            let avgFps = Double(sum) / Double(self.frameCountsBuffer.count)
+            self.frameCount = 0
+            DispatchQueue.main.async {
+                self.fpsBinding?.wrappedValue = avgFps
+            }
+        }
     }
 
     // ...removed setupCamera, now handled by CameraManager...
@@ -526,21 +569,8 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard isModelLoaded, !isProcessingFrame else { return }
         isProcessingFrame = true
-        let now = CACurrentMediaTime()
-        let dt = now - lastFrameTimestamp
-        lastFrameTimestamp = now
-        if let fpsBinding = fpsBinding {
-            // Clamp dt to avoid division by zero and allow low FPS display
-            let fpsValue: Double
-            if dt > 0.0 {
-                fpsValue = 1.0 / dt
-            } else {
-                fpsValue = 0.0
-            }
-            DispatchQueue.main.async {
-                fpsBinding.wrappedValue = fpsValue
-            }
-        }
+        // Increment frame count for timer-based FPS
+        frameCount += 1
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             isProcessingFrame = false
             return
@@ -786,6 +816,15 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     private func drawPolygonsOverlay() {
         guard let previewLayer = cameraManager.previewLayer else { return }
         let imageSize = getCurrentImageSize()
+        var ballCounts: [String: (blue: Int, red: Int)] = [
+            "LG1CZ": (0, 0), "LG1LR": (0, 0),
+            "LG2CZ": (0, 0), "LG2LR": (0, 0),
+            "SG1": (0, 0), "SG2": (0, 0)
+        ]
+        var ballAssignments: [Int: String] = [:] // ball idx -> category
+        var longGoalSegments: [(name: String, line: (CGPoint, CGPoint))] = []
+        var controlZones: [(name: String, line: (CGPoint, CGPoint))] = []
+        var shortGoals: [(name: String, line: (CGPoint, CGPoint))] = []
         // Draw live polygon in light green
         if let livePolygon = fieldOverlayManager.getLivePolygon(from: goalLegTracker) {
             drawPolygon(vertices: livePolygon,
@@ -793,9 +832,58 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                        lineWidth: 4.0,
                        imageSize: imageSize,
                        previewLayer: previewLayer)
-
             // --- Draw overlays for long/short goals ---
             drawRelativeGoalOverlays(on: livePolygon, imageSize: imageSize, previewLayer: previewLayer)
+            // --- Prepare goal segments for collision ---
+            let ordered = orderVerticesClockwise(livePolygon)
+            let longGoalPercents: [[(y: CGFloat, x: CGFloat)]] = longGoalPercentsBinding?.wrappedValue ?? []
+            let shortGoalPercents: [[(y: CGFloat, x: CGFloat)]] = shortGoalPercentsBinding?.wrappedValue ?? []
+            let controlZonePercent: CGFloat = controlZonePercentBinding?.wrappedValue ?? 30.0
+            let minX = ordered.map { $0.x }.min() ?? 0
+            let maxX = ordered.map { $0.x }.max() ?? 0
+            let minY = ordered.map { $0.y }.min() ?? 0
+            let maxY = ordered.map { $0.y }.max() ?? 0
+            for (i, endpoints) in longGoalPercents.enumerated() {
+                guard endpoints.count == 2 else { continue }
+                let x0 = minX + (maxX - minX) * (endpoints[0].x / 100)
+                let y0 = minY + (maxY - minY) * (endpoints[0].y / 100)
+                let x1 = minX + (maxX - minX) * (endpoints[1].x / 100)
+                let y1 = minY + (maxY - minY) * (endpoints[1].y / 100)
+                let pt0 = CGPoint(x: x0, y: y0)
+                let pt1 = CGPoint(x: x1, y: y1)
+                // Split into three segments: left, CZ, right
+                let dx = pt1.x - pt0.x
+                let dy = pt1.y - pt0.y
+                let totalLen = sqrt(dx*dx + dy*dy)
+                let controlFrac = max(0.0, min(1.0, controlZonePercent / 100.0))
+                let controlLen = totalLen * controlFrac
+                let midX = (pt0.x + pt1.x) / 2.0
+                let midY = (pt0.y + pt1.y) / 2.0
+                let halfControlLen = controlLen / 2.0
+                let lineAngle = atan2(dy, dx)
+                let controlStartX = midX - halfControlLen * cos(lineAngle)
+                let controlStartY = midY - halfControlLen * sin(lineAngle)
+                let controlEndX = midX + halfControlLen * cos(lineAngle)
+                let controlEndY = midY + halfControlLen * sin(lineAngle)
+                let controlStartPt = CGPoint(x: controlStartX, y: controlStartY)
+                let controlEndPt = CGPoint(x: controlEndX, y: controlEndY)
+                // Left segment
+                longGoalSegments.append((name: "LG\(i+1)L", line: (pt0, controlStartPt)))
+                // Control zone segment
+                controlZones.append((name: "LG\(i+1)CZ", line: (controlStartPt, controlEndPt)))
+                // Right segment
+                longGoalSegments.append((name: "LG\(i+1)R", line: (controlEndPt, pt1)))
+            }
+            for (i, endpoints) in shortGoalPercents.enumerated() {
+                guard endpoints.count == 2 else { continue }
+                let x0 = minX + (maxX - minX) * (endpoints[0].x / 100)
+                let y0 = minY + (maxY - minY) * (endpoints[0].y / 100)
+                let x1 = minX + (maxX - minX) * (endpoints[1].x / 100)
+                let y1 = minY + (maxY - minY) * (endpoints[1].y / 100)
+                let pt0 = CGPoint(x: x0, y: y0)
+                let pt1 = CGPoint(x: x1, y: y1)
+                shortGoals.append((name: "SG\(i+1)", line: (pt0, pt1)))
+            }
         }
         // Draw reference polygon in dark blue
         if let refPolygon = fieldOverlayManager.getReferencePolygon() {
@@ -805,68 +893,331 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                        imageSize: CGSize(width: 5712, height: 4284),
                        previewLayer: previewLayer)
         }
+        // --- Ball categorization logic ---
+        // Get balls from lastOverlays
+        if let overlays = lastOverlays {
+            let (predictions, _) = overlays
+            var balls: [(idx: Int, center: CGPoint, radius: CGFloat, color: String)] = []
+            for (i, pred) in predictions.enumerated() {
+                if pred.className == "Red Ball" || pred.className == "Blue Ball" {
+                    let cx = CGFloat(pred.x)
+                    let cy = CGFloat(pred.y)
+                    let r = CGFloat(max(pred.width, pred.height)) / 2.0
+                    balls.append((idx: i, center: CGPoint(x: cx, y: cy), radius: r, color: pred.className == "Red Ball" ? "R" : "B"))
+                }
+            }
+            // Priority order
+            let priorities: [(String, [(CGPoint, CGPoint)])] = [
+                ("LG1LR", longGoalSegments.filter { $0.name == "LG1L" || $0.name == "LG1R" }.map { $0.line }),
+                ("LG1CZ", controlZones.filter { $0.name == "LG1CZ" }.map { $0.line }),
+                ("LG2LR", longGoalSegments.filter { $0.name == "LG2L" || $0.name == "LG2R" }.map { $0.line }),
+                ("LG2CZ", controlZones.filter { $0.name == "LG2CZ" }.map { $0.line }),
+                ("SG1", shortGoals.filter { $0.name == "SG1" }.map { $0.line }),
+                ("SG2", shortGoals.filter { $0.name == "SG2" }.map { $0.line })
+            ]
+            for ball in balls {
+                var assigned: String? = nil
+                for (cat, lines) in priorities {
+                    for line in lines {
+                        if ballIntersectsLine(ballCenter: ball.center, ballRadius: ball.radius, line: line) {
+                            assigned = cat
+                            break
+                        }
+                    }
+                    if assigned != nil { break }
+                }
+                if let cat = assigned {
+                    ballAssignments[ball.idx] = cat
+                    if ball.color == "B" {
+                        ballCounts[cat]?.blue += 1
+                    } else {
+                        ballCounts[cat]?.red += 1
+                    }
+                }
+            }
+        }
+        // --- Ball count averaging logic ---
+        let window = ballCountAverageWindowBinding?.wrappedValue ?? 10
+        ballCountBuffer.append(ballCounts)
+        if ballCountBuffer.count > window {
+            ballCountBuffer.removeFirst(ballCountBuffer.count - window)
+        }
+        // Compute average for each category
+        var averagedCounts: [String: (blue: Int, red: Int)] = [:]
+        for key in ballCounts.keys {
+            let blueSum = ballCountBuffer.map { $0[key]?.blue ?? 0 }.reduce(0, +)
+            let redSum = ballCountBuffer.map { $0[key]?.red ?? 0 }.reduce(0, +)
+            let avgBlue = Int(round(Double(blueSum) / Double(ballCountBuffer.count)))
+            let avgRed = Int(round(Double(redSum) / Double(ballCountBuffer.count)))
+            averagedCounts[key] = (avgBlue, avgRed)
+        }
+        // --- Draw overlay rectangle with averaged counts ---
+        drawBallCountOverlay(ballCounts: averagedCounts)
+    }
+
+    /// Returns true if the ball (center, radius) intersects the line segment
+    private func ballIntersectsLine(ballCenter: CGPoint, ballRadius: CGFloat, line: (CGPoint, CGPoint)) -> Bool {
+        // Closest point on line segment to ball center
+        let (p1, p2) = line
+        let dx = p2.x - p1.x
+        let dy = p2.y - p1.y
+        let length = sqrt(dx*dx + dy*dy)
+        if length == 0 { return false }
+        let t = max(0, min(1, ((ballCenter.x - p1.x) * dx + (ballCenter.y - p1.y) * dy) / (length * length)))
+        let closest = CGPoint(x: p1.x + t * dx, y: p1.y + t * dy)
+        let dist = hypot(ballCenter.x - closest.x, ballCenter.y - closest.y)
+        return dist <= ballRadius
+    }
+
+    /// Draws the semi-transparent bezeled rectangle overlay with ball counts
+    private func drawBallCountOverlay(ballCounts: [String: (blue: Int, red: Int)]) {
+        // --- Update gameState from ballCounts using correct model ---
+        // LG1 = topGoals[0], LG2 = topGoals[1]
+        // SG1 = bottomGoals[0], SG2 = bottomGoals[1]
+        // Each goal's blocks: blocks[.red], blocks[.blue]
+        // Control zone: controlPoint.controlledBy
+
+        // LG1
+        let lg1B = (ballCounts["LG1LR"]?.blue ?? 0) + (ballCounts["LG1CZ"]?.blue ?? 0)
+        let lg1R = (ballCounts["LG1LR"]?.red ?? 0) + (ballCounts["LG1CZ"]?.red ?? 0)
+        // LG2
+        let lg2B = (ballCounts["LG2LR"]?.blue ?? 0) + (ballCounts["LG2CZ"]?.blue ?? 0)
+        let lg2R = (ballCounts["LG2LR"]?.red ?? 0) + (ballCounts["LG2CZ"]?.red ?? 0)
+        // SG1
+        let sg1B = ballCounts["SG1"]?.blue ?? 0
+        let sg1R = ballCounts["SG1"]?.red ?? 0
+        // SG2
+        let sg2B = ballCounts["SG2"]?.blue ?? 0
+        let sg2R = ballCounts["SG2"]?.red ?? 0
+
+        // Control zone logic
+        let lg1CZB = ballCounts["LG1CZ"]?.blue ?? 0
+        let lg1CZR = ballCounts["LG1CZ"]?.red ?? 0
+        let lg2CZB = ballCounts["LG2CZ"]?.blue ?? 0
+        let lg2CZR = ballCounts["LG2CZ"]?.red ?? 0
+
+        // Update topGoals (long goals)
+        if gameState.topGoals.count >= 2 {
+            // LG1
+            gameState.topGoals[0].redGoal.blocks[.red] = lg1R
+            gameState.topGoals[0].redGoal.blocks[.blue] = lg1B
+            gameState.topGoals[0].blueGoal.blocks[.red] = lg1R
+            gameState.topGoals[0].blueGoal.blocks[.blue] = lg1B
+            // LG2
+            gameState.topGoals[1].redGoal.blocks[.red] = lg2R
+            gameState.topGoals[1].redGoal.blocks[.blue] = lg2B
+            gameState.topGoals[1].blueGoal.blocks[.red] = lg2R
+            gameState.topGoals[1].blueGoal.blocks[.blue] = lg2B
+        }
+
+        // Update bottomGoals (middle/short goals)
+        if gameState.bottomGoals.count >= 2 {
+            // SG1
+            gameState.bottomGoals[0].redGoal.blocks[.red] = sg1R
+            gameState.bottomGoals[0].redGoal.blocks[.blue] = sg1B
+            gameState.bottomGoals[0].blueGoal.blocks[.red] = sg1R
+            gameState.bottomGoals[0].blueGoal.blocks[.blue] = sg1B
+            // SG2
+            gameState.bottomGoals[1].redGoal.blocks[.red] = sg2R
+            gameState.bottomGoals[1].redGoal.blocks[.blue] = sg2B
+            gameState.bottomGoals[1].blueGoal.blocks[.red] = sg2R
+            gameState.bottomGoals[1].blueGoal.blocks[.blue] = sg2B
+        }
+
+        // Control zone state for LG1
+        let lg1Control: Alliance? = lg1CZB > lg1CZR ? .blue : (lg1CZR > lg1CZB ? .red : nil)
+        let lg2Control: Alliance? = lg2CZB > lg2CZR ? .blue : (lg2CZR > lg2CZB ? .red : nil)
+        if gameState.topGoals.count >= 2 {
+            gameState.topGoals[0].redGoal.controlPoint.controlledBy = lg1Control
+            gameState.topGoals[0].blueGoal.controlPoint.controlledBy = lg1Control
+            gameState.topGoals[1].redGoal.controlPoint.controlledBy = lg2Control
+            gameState.topGoals[1].blueGoal.controlPoint.controlledBy = lg2Control
+        }
+
+        // Remove previous overlay if any
+        if let old = view.viewWithTag(9999) { old.removeFromSuperview() }
+        let overlay = UIView()
+        overlay.tag = 9999
+        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        overlay.layer.cornerRadius = 16
+        overlay.layer.borderWidth = 2
+        overlay.layer.borderColor = UIColor.white.withAlphaComponent(0.7).cgColor
+        overlay.layer.masksToBounds = true
+        // Layout: score title + 4 rows
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.alignment = .center
+        stack.distribution = .equalSpacing
+        let font = UIFont.systemFont(ofSize: 18, weight: .bold)
+        let scoreFont = UIFont.systemFont(ofSize: 24, weight: .bold)
+        // Score title row
+        let scoreRow = UIStackView()
+        scoreRow.axis = .horizontal
+        scoreRow.spacing = 16
+        scoreRow.alignment = .center
+        let redScoreLbl = UILabel()
+        redScoreLbl.text = "\(calculateScore(for: .red, gameState: gameState))"
+        redScoreLbl.font = scoreFont
+        redScoreLbl.textColor = UIColor(named: "AllianceRed") ?? .red
+        redScoreLbl.textAlignment = .right
+        let vsLbl = UILabel()
+        vsLbl.text = "VS"
+        vsLbl.font = UIFont.systemFont(ofSize: 18, weight: .bold)
+        vsLbl.textColor = .white
+        let blueScoreLbl = UILabel()
+        blueScoreLbl.text = "\(calculateScore(for: .blue, gameState: gameState))"
+        blueScoreLbl.font = scoreFont
+        blueScoreLbl.textColor = UIColor(named: "AllianceBlue") ?? .blue
+        blueScoreLbl.textAlignment = .left
+        scoreRow.addArrangedSubview(redScoreLbl)
+        scoreRow.addArrangedSubview(vsLbl)
+        scoreRow.addArrangedSubview(blueScoreLbl)
+        stack.addArrangedSubview(scoreRow)
+        func coloredLabel(_ value: Int, color: UIColor) -> UILabel {
+            let lbl = UILabel()
+            lbl.text = "\(value)"
+            lbl.font = font
+            lbl.textColor = color
+            return lbl
+        }
+        // Helper for SG1 and SG2 rows
+        func row(_ title: String, blue: Int, red: Int) -> UIStackView {
+            let h = UIStackView()
+            h.axis = .horizontal
+            h.spacing = 12
+            h.alignment = .center
+            let titleLbl = UILabel()
+            titleLbl.text = title
+            titleLbl.font = font
+            titleLbl.textColor = .white
+            h.addArrangedSubview(titleLbl)
+            h.addArrangedSubview(coloredLabel(blue, color: .blue))
+            h.addArrangedSubview(coloredLabel(red, color: .red))
+            return h
+        }
+        // LG1 row: CZ, LR
+        let lg1Row = UIStackView()
+        lg1Row.axis = .horizontal
+        lg1Row.spacing = 12
+        lg1Row.alignment = .center
+        let lg1Lbl = UILabel()
+        lg1Lbl.text = "LG1"
+        lg1Lbl.font = font
+        lg1Lbl.textColor = .white
+        lg1Row.addArrangedSubview(lg1Lbl)
+        let czLbl1 = UILabel()
+        czLbl1.text = "CZ"
+        czLbl1.font = font
+        czLbl1.textColor = .white
+        lg1Row.addArrangedSubview(czLbl1)
+        lg1Row.addArrangedSubview(coloredLabel(ballCounts["LG1CZ"]?.blue ?? 0, color: .blue))
+        lg1Row.addArrangedSubview(coloredLabel(ballCounts["LG1CZ"]?.red ?? 0, color: .red))
+        let lrLbl1 = UILabel()
+        lrLbl1.text = "LR"
+        lrLbl1.font = font
+        lrLbl1.textColor = .white
+        lg1Row.addArrangedSubview(lrLbl1)
+        lg1Row.addArrangedSubview(coloredLabel(ballCounts["LG1LR"]?.blue ?? 0, color: .blue))
+        lg1Row.addArrangedSubview(coloredLabel(ballCounts["LG1LR"]?.red ?? 0, color: .red))
+        stack.addArrangedSubview(lg1Row)
+        // LG2 row: CZ, LR
+        let lg2Row = UIStackView()
+        lg2Row.axis = .horizontal
+        lg2Row.spacing = 12
+        lg2Row.alignment = .center
+        let lg2Lbl = UILabel()
+        lg2Lbl.text = "LG2"
+        lg2Lbl.font = font
+        lg2Lbl.textColor = .white
+        lg2Row.addArrangedSubview(lg2Lbl)
+        let czLbl2 = UILabel()
+        czLbl2.text = "CZ"
+        czLbl2.font = font
+        czLbl2.textColor = .white
+        lg2Row.addArrangedSubview(czLbl2)
+        lg2Row.addArrangedSubview(coloredLabel(ballCounts["LG2CZ"]?.blue ?? 0, color: .blue))
+        lg2Row.addArrangedSubview(coloredLabel(ballCounts["LG2CZ"]?.red ?? 0, color: .red))
+        let lrLbl2 = UILabel()
+        lrLbl2.text = "LR"
+        lrLbl2.font = font
+        lrLbl2.textColor = .white
+        lg2Row.addArrangedSubview(lrLbl2)
+        lg2Row.addArrangedSubview(coloredLabel(ballCounts["LG2LR"]?.blue ?? 0, color: .blue))
+        lg2Row.addArrangedSubview(coloredLabel(ballCounts["LG2LR"]?.red ?? 0, color: .red))
+        stack.addArrangedSubview(lg2Row)
+        stack.addArrangedSubview(row("SG1", blue: ballCounts["SG1"]?.blue ?? 0, red: ballCounts["SG1"]?.red ?? 0))
+        stack.addArrangedSubview(row("SG2", blue: ballCounts["SG2"]?.blue ?? 0, red: ballCounts["SG2"]?.red ?? 0))
+        overlay.addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: overlay.topAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: overlay.bottomAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: overlay.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: overlay.trailingAnchor, constant: -16)
+        ])
+        view.addSubview(overlay)
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            overlay.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            overlay.widthAnchor.constraint(equalToConstant: 320),
+            overlay.heightAnchor.constraint(equalToConstant: 180)
+        ])
     }
 
     /// Draws overlays for long and short goals using live polygon and computed ratios/percentages
     private func drawRelativeGoalOverlays(on polygon: [CGPoint], imageSize: CGSize, previewLayer: AVCaptureVideoPreviewLayer) {
         guard polygon.count == 4 else { return }
-        // Order: [topLeft, topRight, bottomRight, bottomLeft] (clockwise)
         let ordered = orderVerticesClockwise(polygon)
         // --- Long Goals ---
-        // Horizontal pairs: (0,1) and (2,3)
-        let longGoalPairs = [(0,1), (2,3)]
-        let longGoalRatios: [CGFloat] = [0.9051, 0.9558] // From script output
-        let longGoalControlZone: (start: CGFloat, end: CGFloat) = (0.35, 0.65)
-        let longGoalHeightIncrements: [CGFloat] = [90.0, 190.0] // top long goal: lower by 10, bottom long goal: raise by 90
-        for (i, pair) in longGoalPairs.enumerated() {
-            let p1 = ordered[pair.0]
-            let p2 = ordered[pair.1]
-            let centerDist = hypot(p2.x - p1.x, p2.y - p1.y)
-            let goalLen = centerDist * longGoalRatios[i]
-            // Find direction vector
-            let dx = (p2.x - p1.x) / centerDist
-            let dy = (p2.y - p1.y) / centerDist
-            // Compute endpoints for the long goal line
-            let mid = CGPoint(x: (p1.x + p2.x)/2, y: (p1.y + p2.y)/2)
-            let halfLen = goalLen / 2
-            var ep1 = CGPoint(x: mid.x - dx * halfLen, y: mid.y - dy * halfLen)
-            var ep2 = CGPoint(x: mid.x + dx * halfLen, y: mid.y + dy * halfLen)
-            // Move endpoints vertically by custom increment
-            ep1.y -= longGoalHeightIncrements[i]
-            ep2.y -= longGoalHeightIncrements[i]
-            // Draw long goal line (yellow)
-            drawLine(from: ep1, to: ep2, color: UIColor.systemYellow, lineWidth: 5.0, imageSize: imageSize, previewLayer: previewLayer)
-            // Draw control zone points (orange)
-            var cz1 = CGPoint(x: ep1.x + (ep2.x - ep1.x) * longGoalControlZone.start, y: ep1.y + (ep2.y - ep1.y) * longGoalControlZone.start)
-            var cz2 = CGPoint(x: ep1.x + (ep2.x - ep1.x) * longGoalControlZone.end, y: ep1.y + (ep2.y - ep1.y) * longGoalControlZone.end)
-            // Control zones already moved with ep1/ep2
-            drawPoint(at: cz1, color: UIColor.orange, radius: 14, imageSize: imageSize, previewLayer: previewLayer)
-            drawPoint(at: cz2, color: UIColor.orange, radius: 14, imageSize: imageSize, previewLayer: previewLayer)
-        }
-        // --- Short Goals ---
-        // Percentages from script output
-        let shortGoalPercents: [[(y: CGFloat, x: CGFloat)]] = [
-            [(48.10, 57.07), (34.76, 44.68)], // Short Goal 1
-            [(73.33, 41.99), (58.10, 55.18)]  // Short Goal 2
-        ]
-        // Polygon bounds
+        let longGoalPercents: [[(y: CGFloat, x: CGFloat)]] = longGoalPercentsBinding?.wrappedValue ?? []
+        let shortGoalPercents: [[(y: CGFloat, x: CGFloat)]] = shortGoalPercentsBinding?.wrappedValue ?? []
+        let controlZonePercent: CGFloat = controlZonePercentBinding?.wrappedValue ?? 30.0
         let minX = ordered.map { $0.x }.min() ?? 0
         let maxX = ordered.map { $0.x }.max() ?? 0
         let minY = ordered.map { $0.y }.min() ?? 0
         let maxY = ordered.map { $0.y }.max() ?? 0
-        for (goalIdx, endpoints) in shortGoalPercents.enumerated() {
-            var pts: [CGPoint] = []
-            for ep in endpoints {
-                // Undo Y inversion for short goals
-                let x = minX + (maxX - minX) * (ep.x / 100)
-                var y = minY + (maxY - minY) * (ep.y / 100)
-                // Raise short goals by 200
-                y -= 150.0
-                pts.append(CGPoint(x: x, y: y))
-            }
-            if pts.count == 2 {
-                drawLine(from: pts[0], to: pts[1], color: UIColor.systemPink, lineWidth: 5.0, imageSize: imageSize, previewLayer: previewLayer)
-            }
+        for endpoints in longGoalPercents {
+            guard endpoints.count == 2 else { continue }
+            let x0 = minX + (maxX - minX) * (endpoints[0].x / 100)
+            let y0 = minY + (maxY - minY) * (endpoints[0].y / 100)
+            let x1 = minX + (maxX - minX) * (endpoints[1].x / 100)
+            let y1 = minY + (maxY - minY) * (endpoints[1].y / 100)
+            let pt0 = CGPoint(x: x0, y: y0)
+            let pt1 = CGPoint(x: x1, y: y1)
+            // Draw control zone (centered % pink, rest yellow)
+            let dx = pt1.x - pt0.x
+            let dy = pt1.y - pt0.y
+            let totalLen = sqrt(dx*dx + dy*dy)
+            let controlFrac = max(0.0, min(1.0, controlZonePercent / 100.0))
+            let controlLen = totalLen * controlFrac
+            // Calculate start and end points for centered control zone
+            let midX = (pt0.x + pt1.x) / 2.0
+            let midY = (pt0.y + pt1.y) / 2.0
+            let halfControlLen = controlLen / 2.0
+            let lineAngle = atan2(dy, dx)
+            let controlStartX = midX - halfControlLen * cos(lineAngle)
+            let controlStartY = midY - halfControlLen * sin(lineAngle)
+            let controlEndX = midX + halfControlLen * cos(lineAngle)
+            let controlEndY = midY + halfControlLen * sin(lineAngle)
+            let controlStartPt = CGPoint(x: controlStartX, y: controlStartY)
+            let controlEndPt = CGPoint(x: controlEndX, y: controlEndY)
+            // Draw outer segments (yellow)
+            drawLine(from: pt0, to: controlStartPt, color: UIColor.systemYellow, lineWidth: 5.0, imageSize: imageSize, previewLayer: previewLayer)
+            drawLine(from: controlEndPt, to: pt1, color: UIColor.systemYellow, lineWidth: 5.0, imageSize: imageSize, previewLayer: previewLayer)
+            // Draw centered control zone (pink)
+            drawLine(from: controlStartPt, to: controlEndPt, color: UIColor.systemPink, lineWidth: 5.0, imageSize: imageSize, previewLayer: previewLayer)
+        }
+        for endpoints in shortGoalPercents {
+            guard endpoints.count == 2 else { continue }
+            let x0 = minX + (maxX - minX) * (endpoints[0].x / 100)
+            let y0 = minY + (maxY - minY) * (endpoints[0].y / 100)
+            let x1 = minX + (maxX - minX) * (endpoints[1].x / 100)
+            let y1 = minY + (maxY - minY) * (endpoints[1].y / 100)
+            let pt0 = CGPoint(x: x0, y: y0)
+            let pt1 = CGPoint(x: x1, y: y1)
+            drawLine(from: pt0, to: pt1, color: UIColor.systemPink, lineWidth: 5.0, imageSize: imageSize, previewLayer: previewLayer)
         }
     }
 

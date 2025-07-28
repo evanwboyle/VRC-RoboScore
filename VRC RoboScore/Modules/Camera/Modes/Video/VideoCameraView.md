@@ -1,3 +1,49 @@
+## Live Ball Detection Wiring to GameState (2025-07-28)
+
+### Overview
+The camera overlay now directly updates the calculator `GameState` with live ball detection results. This enables real-time scoring and control zone logic based on detected ball positions and colors.
+
+### Mapping Logic
+- **Long Goals (LG1, LG2):**
+    - LG1 = `topGoals[0]`, LG2 = `topGoals[1]` in `GameState`.
+    - For each, the total blue/red balls is the sum of balls in LR (left/right) and CZ (control zone) segments.
+    - These are set via `blocks[.red]` and `blocks[.blue]` on both the red and blue goals in each `GoalPair`.
+- **Short Goals (SG1, SG2):**
+    - SG1 = `bottomGoals[0]`, SG2 = `bottomGoals[1]` in `GameState`.
+    - Blue/red ball counts are set via `blocks[.red]` and `blocks[.blue]` on both goals in each pair.
+- **Control Zone State:**
+    - For each long goal, the control zone state is determined by comparing the number of red and blue balls in the CZ segment.
+    - If blue > red, control is set to `.blue`; if red > blue, control is `.red`; if equal, control is `nil` (tie).
+    - This is set via `controlPoint.controlledBy` on both goals in the pair.
+
+### Implementation Details
+- The ball counts are calculated and averaged over a sliding window for stability.
+- The overlay logic in `CameraViewController` calls `drawBallCountOverlay`, which updates the `GameState` as described above.
+- The calculator UI and scoring logic now reflect live camera detections automatically.
+
+### Example Code (Swift)
+```swift
+// LG1
+let lg1B = (ballCounts["LG1LR"]?.blue ?? 0) + (ballCounts["LG1CZ"]?.blue ?? 0)
+let lg1R = (ballCounts["LG1LR"]?.red ?? 0) + (ballCounts["LG1CZ"]?.red ?? 0)
+// Update blocks for both goals in LG1 pair
+gameState.topGoals[0].redGoal.blocks[.red] = lg1R
+gameState.topGoals[0].redGoal.blocks[.blue] = lg1B
+gameState.topGoals[0].blueGoal.blocks[.red] = lg1R
+gameState.topGoals[0].blueGoal.blocks[.blue] = lg1B
+// Control zone
+let lg1Control: Alliance? = lg1CZB > lg1CZR ? .blue : (lg1CZR > lg1CZB ? .red : nil)
+gameState.topGoals[0].redGoal.controlPoint.controlledBy = lg1Control
+gameState.topGoals[0].blueGoal.controlPoint.controlledBy = lg1Control
+```
+
+### Developer Notes
+- The mapping is robust to changes in the underlying model or UI, as long as the goal ordering and segment naming conventions are maintained.
+- If the game format changes, update the mapping logic in `drawBallCountOverlay`.
+- The control zone logic uses the `Alliance` enum from the calculator model for consistency.
+
+### Changelog
+- **2025-07-28:** Added direct wiring from camera ball detection to calculator `GameState`, including correct mapping to topGoals/bottomGoals and control zone logic.
 # Model Persistence (NEW)
 - `hasLoadedModel` (file scope): Tracks if the Roboflow model has loaded in this app session. Prevents loading overlay on subsequent opens.
 - `sharedRFModel` (file scope): Persists the loaded Roboflow model instance across camera opens. Ensures detection works after reopening the camera.
@@ -157,11 +203,7 @@
 - **Ghost Leg Movement:** Ghost legs now shift by the average movement of tracked goal legs that have persisted for 3+ frames. If no legs meet this threshold, ghost legs remain stationary for that frame. If tracked legs move erratically, ghost leg movement may be less accurate.
 
 ## TODO
-- Add camera panning detection to make ghosts track better
-- Add SORT tracking to "Red Ball" and "Blue Ball" objects, with lifecycle to prevent flickering, this might be too computationally expensive though. Maybe try next bullet point instead
-- Use last 5-10 scores (chosen with slider by user) to update the score display so that it is averaged out and flickering shouldnt be an issue, also so that the score is a litle bit more consistent while still being fast
-- Add Control Zone detection through "Goal Leg" position tracking. Make python script that lets me find pixel coordinates of lines of pipes, including control zones. Then, make the coordinates scale to the live distances of the goal legs. Use the lines to find balls within the goals and then score them. Start out scoring with a simple overlay on each ball, making it have green text on the outside goals and orange text on the control zones. Remember to give ample context as to how the goals work in the real game (size limits, middle has no control)
-- Add live scoring with transparent overlay
+- Use last 5-10 scores (chosen with slider by user)
 - Add goal control changes to overlay
 - Make model load while app opens up so it is instantly ready for use
 
