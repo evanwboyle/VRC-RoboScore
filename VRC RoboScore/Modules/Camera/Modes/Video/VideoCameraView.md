@@ -206,6 +206,10 @@ gameState.topGoals[0].blueGoal.controlPoint.controlledBy = lg1Control
 - Use last 5-10 scores (chosen with slider by user)
 - Add goal control changes to overlay
 - Make model load while app opens up so it is instantly ready for use
+- Fix reference being broken on portrait, up and down
+- Fix camera being broken on up and down
+- Fix LG CZ in regular calculator
+- add park zones and auton bonus to overlay
 
 
 ## Overlay Logic: Long and Short Goal Adjustments (2025-07-27)

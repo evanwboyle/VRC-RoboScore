@@ -177,7 +177,16 @@ class GoalLegTrackerManager {
 struct FieldCameraView: View {
     @Binding var isPresented: Bool
     @ObservedObject var gameState: GameState
-    @State private var isPaused: Bool = false
+    @State var isPaused: Bool = false
+    @State var lastDetectionTime: Date = Date()
+    @State var detectedObjectCount: Int = 0
+
+    // Delegate for camera events
+    class CameraEventDelegate: NSObject {
+        var onDetectionUpdate: ((Int, Date?) -> Void)?
+    }
+    let cameraEventDelegate = CameraEventDelegate()
+    @State private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var fps: Double = 0.0
     @State private var isModelLoaded: Bool = false
     @State var longGoalPercents: [[(y: CGFloat, x: CGFloat)]] = [
@@ -191,68 +200,148 @@ struct FieldCameraView: View {
     ]
     @State var ballCountAverageWindow: Int = 10
     @State private var showValueEditor: Bool = false
+    @State private var showSettings: Bool = false
+    @State private var displayFPS: Bool = true
+    @State private var displayDetections: Bool = true
+    @State private var displayTotalDetections: Bool = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             CameraViewControllerRepresentable(
                 isPaused: $isPaused,
                 fps: $fps,
+                displayFPS: $displayFPS,
                 isModelLoaded: $isModelLoaded,
                 longGoalPercents: $longGoalPercents,
                 shortGoalPercents: $shortGoalPercents,
                 controlZonePercent: $controlZonePercent,
                 ballCountAverageWindow: $ballCountAverageWindow,
-                gameState: gameState
+                gameState: gameState,
+                eventDelegate: cameraEventDelegate
             )
             .edgesIgnoringSafeArea(.all)
             VStack(spacing: 0) {
                 // Top bar: X button, pause, FPS, and score
-                HStack(spacing: CameraConstants.cameraButtonSpacing) {
-                    Button(action: { isPresented = false }) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.black.opacity(CameraConstants.cameraButtonBackgroundOpacity))
-                                .frame(width: CameraConstants.cameraButtonSize, height: CameraConstants.cameraButtonSize)
-                            Image(systemName: "xmark")
-                                .resizable()
-                                .frame(width: CameraConstants.cameraButtonIconSize, height: CameraConstants.cameraButtonIconSize)
-                                .foregroundColor(Color.black.opacity(CameraConstants.cameraButtonIconOpacity))
-                        }
+            HStack(spacing: CameraConstants.cameraButtonSpacing) {
+                Button(action: { isPresented = false }) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.black.opacity(CameraConstants.cameraButtonBackgroundOpacity))
+                            .frame(width: CameraConstants.cameraButtonSize, height: CameraConstants.cameraButtonSize)
+                        Image(systemName: "xmark")
+                            .resizable()
+                            .frame(width: CameraConstants.cameraButtonIconSize, height: CameraConstants.cameraButtonIconSize)
+                            .foregroundColor(Color.white.opacity(CameraConstants.cameraButtonIconOpacity))
                     }
-                    Button(action: { isPaused.toggle() }) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: CameraConstants.pauseButtonCornerRadius)
-                                .fill(Color.black.opacity(CameraConstants.pauseButtonBackgroundOpacity))
-                                .frame(width: CameraConstants.pauseButtonWidth, height: CameraConstants.pauseButtonHeight)
-                            Text(isPaused ? "Unpause" : "Pause")
-                                .font(.system(size: CameraConstants.pauseButtonFontSize, weight: .bold))
-                                .foregroundColor(Color.black.opacity(CameraConstants.pauseButtonTextOpacity))
-                        }
+                }
+                Button(action: {
+                    let wasPaused = isPaused
+                    isPaused.toggle()
+                    // If user manually unpauses, reset the auto-pause timer
+                    if wasPaused == true && isPaused == false {
+                        lastDetectionTime = Date()
                     }
-                    Spacer()
+                }) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: CameraConstants.pauseButtonCornerRadius)
+                            .fill(isPaused ? Color.yellow.opacity(0.7) : Color.black.opacity(CameraConstants.pauseButtonBackgroundOpacity))
+                            .frame(width: CameraConstants.pauseButtonWidth, height: CameraConstants.pauseButtonHeight)
+                        Text(isPaused ? "Unpause" : "Pause")
+                            .font(.system(size: CameraConstants.pauseButtonFontSize, weight: .bold))
+                            .foregroundColor(isPaused ? Color.white : Color.white.opacity(CameraConstants.pauseButtonTextOpacity))
+                    }
+                }
+                Spacer()
+                // FPS Counter
+                if displayFPS {
                     ZStack {
                         RoundedRectangle(cornerRadius: CameraConstants.pauseButtonCornerRadius)
                             .fill(Color.black.opacity(CameraConstants.pauseButtonBackgroundOpacity))
                             .frame(width: CameraConstants.pauseButtonWidth, height: CameraConstants.pauseButtonHeight)
                         Text(String(format: "FPS: %.1f", fps))
                             .font(.system(size: CameraConstants.pauseButtonFontSize, weight: .bold))
-                            .foregroundColor(Color.black.opacity(CameraConstants.pauseButtonTextOpacity))
+                            .foregroundColor(Color.white.opacity(CameraConstants.pauseButtonTextOpacity))
                     }
                 }
+            
+                // Total Detections Counter
+                if displayTotalDetections {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: CameraConstants.pauseButtonCornerRadius)
+                            .fill(Color.black.opacity(CameraConstants.pauseButtonBackgroundOpacity))
+                            .frame(width: 70, height: CameraConstants.pauseButtonHeight)
+                        Text("Total: \(detectedObjectCount)")
+                            .font(.system(size: CameraConstants.pauseButtonFontSize, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+            }
                 .padding(.top, 8)
                 .padding(.bottom, 4)
                 if !isModelLoaded && !hasLoadedModel {
-                    Color.black.opacity(0.45).edgesIgnoringSafeArea(.all)
+                    //Color.black.opacity(0.45).edgesIgnoringSafeArea(.all)
                     VStack(spacing: 24) {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             .scaleEffect(2.0)
-                        Text("Loading Camera Model...")
+                        Text("Loading Scoring Model...")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(.white)
                     }
                 }
                 Spacer()
+                // Settings gear button at bottom right
+                HStack {
+                    Spacer()
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape")
+                            .resizable()
+                            .frame(width: 32, height: 32)
+                            .foregroundColor(.white)
+                            .padding(0)
+                            .background(Color.black.opacity(0.5))
+                            .clipShape(Circle())
+                    }
+                }
+                .padding(.bottom, 24)
+            }
+        }
+        // Auto-pause logic
+        .onReceive(timer) { _ in
+            let timeSinceDetection = Date().timeIntervalSince(lastDetectionTime)
+            if !isPaused && timeSinceDetection > 10 {
+                isPaused = true
+            }
+        }
+
+        .onAppear {
+            cameraEventDelegate.onDetectionUpdate = { count, date in
+                detectedObjectCount = count
+                if let date = date, count > 0 {
+                    lastDetectionTime = date
+                }
+            }
+        }
+        // Settings sheet
+        .sheet(isPresented: $showSettings) {
+            NavigationView {
+                Form {
+                    Section(header: Text("Display")) {
+                        Toggle(isOn: $displayFPS) {
+                            Label("Display FPS", systemImage: "speedometer")
+                        }
+                        Toggle(isOn: $displayTotalDetections) {
+                            Label("Display Total Detection Counts", systemImage: "number")
+                        }
+                    }
+                }
+                .navigationTitle("Settings")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { showSettings = false }
+                    }
+                }
             }
         }
     }
@@ -261,6 +350,7 @@ struct FieldCameraView: View {
 struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
     @Binding var isPaused: Bool
     @Binding var fps: Double
+    @Binding var displayFPS: Bool
     @Binding var isModelLoaded: Bool
     @Binding var longGoalPercents: [[(y: CGFloat, x: CGFloat)]]
     @Binding var shortGoalPercents: [[(y: CGFloat, x: CGFloat)]]
@@ -268,22 +358,26 @@ struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
     @Binding var ballCountAverageWindow: Int
 
     var gameState: GameState
+    var eventDelegate: FieldCameraView.CameraEventDelegate
 
     func makeUIViewController(context: Context) -> CameraViewController {
         let vc = CameraViewController()
         vc.isPausedBinding = $isPaused
         vc.fpsBinding = $fps
+        vc.displayFPSBinding = $displayFPS
         vc.isModelLoadedBinding = $isModelLoaded
         vc.longGoalPercentsBinding = $longGoalPercents
         vc.shortGoalPercentsBinding = $shortGoalPercents
         vc.controlZonePercentBinding = $controlZonePercent
         vc.ballCountAverageWindowBinding = $ballCountAverageWindow
         vc.gameState = gameState
+        vc.eventDelegate = eventDelegate
         return vc
     }
     func updateUIViewController(_ uiViewController: CameraViewController, context: Context) {
         uiViewController.isPausedBinding = $isPaused
         uiViewController.fpsBinding = $fps
+        uiViewController.displayFPSBinding = $displayFPS
         uiViewController.isModelLoadedBinding = $isModelLoaded
         uiViewController.longGoalPercentsBinding = $longGoalPercents
         uiViewController.shortGoalPercentsBinding = $shortGoalPercents
@@ -294,6 +388,7 @@ struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
 }
 
 class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
+    var eventDelegate: FieldCameraView.CameraEventDelegate?
     var gameState: GameState!
     var longGoalPercentsBinding: Binding<[[ (y: CGFloat, x: CGFloat) ]]>? = nil
     var shortGoalPercentsBinding: Binding<[[ (y: CGFloat, x: CGFloat) ]]>? = nil
@@ -326,6 +421,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     private let goalLegTracker = GoalLegTrackerManager()
     var isPausedBinding: Binding<Bool>? = nil
     var fpsBinding: Binding<Double>? = nil
+    var displayFPSBinding: Binding<Bool>? = nil
     var isModelLoadedBinding: Binding<Bool>? = nil
     private var lastFrameTimestamp: CFTimeInterval = CACurrentMediaTime()
     // FPS timer-based counter
@@ -443,23 +539,24 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                 if let error = error {
                     print("Detection error: \(error)")
                 } else if let predictions = predictions as? [RFObjectDetectionPrediction] {
+                    //print("Predictions: \(predictions.map { $0.className })")
                     // Update Goal Leg tracker
                     self?.goalLegTracker.update(with: predictions)
-                    // Draw tracked Goal Legs
+                    // Count only real detections (not ghost legs)
+                    let realDetections = predictions.count
+                    self?.eventDelegate?.onDetectionUpdate?(realDetections, realDetections > 0 ? Date() : nil)
                     self?.drawTrackedGoalLegs(imageSize: image.size)
-                    // Draw ghost legs if needed
                     if let tracker = self?.goalLegTracker {
                         let aliveCount = tracker.trackedGoalLegs.count
                         if aliveCount <= 3 && tracker.ghostLegs.count > 0 {
                             self?.drawGhostLegs(imageSize: image.size)
                         }
                     }
-                    // Draw other bounding boxes (balls, etc)
                     self?.drawBoundingBoxes(predictions: predictions, imageSize: image.size, skipGoalLegs: true)
                     self?.drawFieldOverlay()
                     self?.lastOverlays = (predictions, image.size)
                 } else {
-                    print("Predictions: \(String(describing: predictions))")
+                    //print("Predictions: \(String(describing: predictions))")
                 }
                 self?.isProcessingFrame = false
             }
@@ -654,6 +751,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     }
 
     private var fieldOverlayManager = FieldOverlayManager()
+    private var hasShownLivePolygon = false
     
     private func drawFieldOverlay() {
         guard let previewLayer = cameraManager.previewLayer else { return }
@@ -667,16 +765,19 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         var longGoalSegments: [(name: String, line: (CGPoint, CGPoint))] = []
         var controlZones: [(name: String, line: (CGPoint, CGPoint))] = []
         var shortGoals: [(name: String, line: (CGPoint, CGPoint))] = []
-        // Draw live polygon in light green
-        if let livePolygon = fieldOverlayManager.getLivePolygon(from: goalLegTracker) {
+        // Draw live polygon in light green (always same color, regardless of pause)
+        // Only form live polygon if there are exactly 4 goal legs (tracked + ghost)
+        let totalLegs = goalLegTracker.trackedGoalLegs.count + goalLegTracker.ghostLegs.count
+        let livePolygon = (totalLegs == 4) ? fieldOverlayManager.getLivePolygon(from: goalLegTracker) : nil
+        if let livePolygon = livePolygon {
             CameraGeometryUtils.drawPolygon(
-            vertices: livePolygon,
-            color: UIColor.systemGreen.withAlphaComponent(0.7),
-            lineWidth: 4.0,
-            imageSize: imageSize,
-            overlayView: overlayView,
-            previewLayer: previewLayer,
-            boundingBoxLayers: &boundingBoxLayers
+                vertices: livePolygon,
+                color: UIColor.systemGreen.withAlphaComponent(0.7),
+                lineWidth: 4.0,
+                imageSize: imageSize,
+                overlayView: overlayView,
+                previewLayer: previewLayer,
+                boundingBoxLayers: &boundingBoxLayers
             )
             // --- Draw overlays for long/short goals ---
             drawRelativeGoalOverlays(on: livePolygon, imageSize: imageSize, previewLayer: previewLayer)
@@ -730,17 +831,21 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                 let pt1 = CGPoint(x: x1, y: y1)
                 shortGoals.append((name: "SG\(i+1)", line: (pt0, pt1)))
             }
+            // Hide reference polygon after first live polygon
+            if !hasShownLivePolygon {
+                hasShownLivePolygon = true
+            }
         }
-        // Draw reference polygon in dark blue
-        if let refPolygon = fieldOverlayManager.getReferencePolygon() {
+        // Draw reference polygon in dark blue only if live polygon has not been shown
+        if !hasShownLivePolygon, let refPolygon = fieldOverlayManager.getReferencePolygon() {
             CameraGeometryUtils.drawPolygon(
-            vertices: refPolygon,
-            color: UIColor.systemBlue.withAlphaComponent(0.85),
-            lineWidth: 3.0,
-            imageSize: CGSize(width: 5712, height: 4284),
-            overlayView: overlayView,
-            previewLayer: previewLayer,
-            boundingBoxLayers: &boundingBoxLayers
+                vertices: refPolygon,
+                color: UIColor.systemBlue.withAlphaComponent(0.85),
+                lineWidth: 3.0,
+                imageSize: CGSize(width: 5712, height: 4284),
+                overlayView: overlayView,
+                previewLayer: previewLayer,
+                boundingBoxLayers: &boundingBoxLayers
             )
         }
         // --- Ball categorization logic ---

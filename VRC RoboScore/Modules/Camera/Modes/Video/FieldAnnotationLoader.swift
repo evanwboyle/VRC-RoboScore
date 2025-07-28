@@ -88,7 +88,7 @@ extension FieldAnnotationLoader {
         }
         let annotationPath = url.path
         if let annotations = FieldAnnotationLoader.loadAnnotations(from: annotationPath) {
-            print("[FieldAnnotationLoader] Loaded annotations: \(annotations)")
+            //print("[FieldAnnotationLoader] Loaded annotations: \(annotations)")
         } else {
             print("[FieldAnnotationLoader] Failed to load annotations.")
         }
